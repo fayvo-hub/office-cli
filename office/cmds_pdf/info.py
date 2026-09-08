@@ -34,12 +34,24 @@ def register(sp: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> dict:
     reader = pdfutil.open_reader(args.file)
     meta = {}
-    if reader.metadata is not None:
-        for k in ("title", "author", "subject", "keywords", "creator", "producer"):
-            v = getattr(reader.metadata, k, None)
-            meta[k] = str(v) if v else None
-    first = pdfutil.page_size_mm(reader.pages[0]) if reader.pages else None
-    return {"ok": True, "file": args.file, "pages": len(reader.pages),
+    try:
+        if reader.metadata is not None:
+            for k in ("title", "author", "subject", "keywords", "creator", "producer"):
+                v = getattr(reader.metadata, k, None)
+                meta[k] = str(v) if v else None
+    except Exception:
+        pass  # 加密未解锁时元数据不可读
+    pages = first = None
+    try:
+        pages = len(reader.pages)
+        first = pdfutil.page_size_mm(reader.pages[0]) if pages else None
+    except Exception:
+        pass  # 加密未解锁时页数不可得, 仅报 encrypted
+    try:
+        reader.stream.close()
+    except Exception:
+        pass
+    return {"ok": True, "file": args.file, "pages": pages,
             "encrypted": bool(reader.is_encrypted),
             "size_bytes": os.path.getsize(args.file),
             "metadata": meta, "first_page": first}

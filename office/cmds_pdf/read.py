@@ -47,6 +47,23 @@ def run(args: argparse.Namespace) -> dict:
         import pdfplumber
     except ImportError:  # pragma: no cover
         raise CliError("need_dep", "pdf read 需要 pdfplumber: pip install pdfplumber") from None
+    # pdfminer 对部分字体的无害警告会刷屏 stderr, 抑制到 ERROR
+    import logging
+    logging.getLogger("pdfminer").setLevel(logging.ERROR)
+
+    # 先探测加密状态(加密文件须先 decrypt, pdfplumber 无法处理)
+    probe = pdfutil.open_reader(args.file)
+    if probe.is_encrypted:
+        try:
+            probe.stream.close()
+        except Exception:
+            pass
+        raise CliError("encrypted",
+                       f"PDF 已加密: {args.file}(请先 office pdf decrypt)")
+    try:
+        probe.stream.close()
+    except Exception:
+        pass
 
     try:
         pdf = pdfplumber.open(args.file)

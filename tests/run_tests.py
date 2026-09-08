@@ -38,7 +38,7 @@ def run(*argv: str) -> tuple[int, dict | None, dict | None]:
     proc = subprocess.run(
         [sys.executable, "-m", "office", *argv],
         capture_output=True, text=True, encoding="utf-8",
-        cwd=ROOT, timeout=60,
+        cwd=ROOT, timeout=180,
     )
     out = err = None
     try:
@@ -98,6 +98,10 @@ def main() -> int:
     demo = copy_sample("demo.xlsx")
     cached = copy_sample("demo_cached.xlsx")
     pivot_f = copy_sample("demo_pivot.xlsx")
+    sample_md = copy_sample("sample.md")
+    sample_docx = copy_sample("sample.docx")
+    legacy_xls = os.path.join(SAMPLES, "legacy.xls")
+    legacy_doc = os.path.join(SAMPLES, "legacy.doc")
 
     # ---------- list ----------
     out = expect_ok("list 基本", "list", "-f", demo)
@@ -299,7 +303,7 @@ def main() -> int:
     o_csv2 = wpath("out2.json")
     expect_ok("convert csv->json", "convert", "-f", os.path.join(SAMPLES, "utf8.csv"),
               "--out", o_csv2)
-    expect_err("convert 不支持方向", "unsupported", "convert", "-f", demo,
+    expect_err("convert 不支持方向", "unsupported_format", "convert", "-f", demo,
                "--out", wpath("a.xls"))
     expect_err("convert 同路径", "same_file", "convert", "-f", demo, "--out", demo)
 
@@ -346,6 +350,188 @@ def main() -> int:
                "--name", "不存在", "--ref", "A1:B2")
     out = expect_ok("pivot list 无透视表文件", "pivot", "list", "-f", demo)
     check("pivot list 空", out and out["pivots"] == [], str(out))
+
+    # ======================================================================
+    # word 组(显式带组名;word write 增删改查 + 图片/样式元数据)
+    # ======================================================================
+    w1 = wpath("w_new.docx")
+    out = expect_ok("word write 新建", "word", "write", "-f", w1, "--create",
+                    "--text", "你好世界")
+    check("word write 返回", out and out.get("appended_blocks") == 1, str(out))
+    out = expect_ok("word write 追加", "word", "write", "-f", w1,
+                    "--text", "第二段内容")
+    out = expect_ok("word read 回读", "word", "read", "-f", w1)
+    check("word 追加生效", out and len(out["paragraphs"]) == 2
+          and out["paragraphs"][1]["text"] == "第二段内容",
+          str(out and out["paragraphs"]))
+    expect_err("word write 需 --create", "no_file", "word", "write",
+               "-f", wpath("nope.docx"), "--text", "x")
+
+    with open(wpath("bad.json"), "w") as fh:
+        fh.write("{not json")
+    expect_err("word write 坏 json", "bad_json", "word", "write", "-f", w1,
+               "--data-file", wpath("bad.json"))
+
+    out = expect_ok("word read 样本结构", "word", "read", "-f", sample_docx)
+    txts = [p["text"] for p in (out or {}).get("paragraphs", [])]
+    check("word 样本标题", out and "Word 样本文档" in txts, str(out and txts))
+    check("word 样本表格", out and len(out["tables"]) == 1
+          and out["tables"][0]["cols"] == 2, str(out and out["tables"]))
+    check("word 样本图片元数据", out and len(out["images"]) == 1
+          and out["images"][0]["size_bytes"] > 0, str(out and out["images"]))
+
+    imgdir = wpath("wimgs")
+    out = expect_ok("word read --save-images", "word", "read", "-f",
+                    sample_docx, "--save-images", imgdir)
+    check("word 图片导出", out and out["saved_images"]
+          and os.path.exists(out["saved_images"][0]), str(out))
+
+    if os.path.exists(legacy_doc):
+        out = expect_ok("word read legacy.doc 自动升级", "word", "read", "-f",
+                        legacy_doc)
+        check("doc 内容可读", out and len(out["paragraphs"]) > 0,
+              str(out and len(out["paragraphs"])))
+    if os.path.exists(legacy_xls):
+        out = expect_ok("excel read legacy.xls 自动升级", "read", "-f",
+                        legacy_xls)
+        check("xls 内容可读", out and out["row_count"] >= 12, str(out))
+
+    # ======================================================================
+    # md 组(md → pdf/html/docx + 往返)
+    # ======================================================================
+    pdf_path = wpath("sample.pdf")
+    out = expect_ok("md to-pdf", "md", "to-pdf", "-f", sample_md,
+                    "--out", pdf_path)
+    n_pdf = (out or {}).get("pages") or 1
+    check("md to-pdf 页数", out and n_pdf >= 1 and n_pdf <= 3,
+          str(out))
+    html_path = wpath("sample.html")
+    out = expect_ok("md to-html", "md", "to-html", "-f", sample_md,
+                    "--out", html_path)
+    with open(html_path, encoding="utf-8") as fh:
+        html_txt = fh.read()
+    check("html 含 mermaid 与样式", "mermaid" in html_txt
+          and "codehilite" in html_txt and "@page" in html_txt, "")
+
+    docx2 = wpath("from_md.docx")
+    out = expect_ok("md to-docx", "md", "to-docx", "-f", sample_md,
+                    "--out", docx2)
+    out = expect_ok("md→docx→md 往返", "convert", "-f", docx2, "--to", "md",
+                    "--out", wpath("roundtrip.md"))
+    with open(wpath("roundtrip.md"), encoding="utf-8") as fh:
+        rt = fh.read()
+    check("往返保留标题", "# 办公文档转换样本" in rt, "")
+    check("往返保留表格行", "| 苹果 |" in rt or "苹果" in rt, "")
+    check("往返保留代码", "def calc" in rt, "")
+    check("往返保留引用", ">" in rt and "引用块" in rt, "")
+
+    # ======================================================================
+    # pdf 组(基于 sample.pdf)
+    # ======================================================================
+    out = expect_ok("pdf info", "pdf", "info", "-f", pdf_path)
+    fp = (out or {}).get("first_page") or {}
+    check("pdf info 尺寸 A4", out and 209 <= fp.get("width_mm", 0) <= 212
+          and 296 <= fp.get("height_mm", 0) <= 300, str(out))
+    out = expect_ok("pdf read 文本", "pdf", "read", "-f", pdf_path)
+    all_text = "".join(pg["text"] for pg in (out or {}).get("pages", []))
+    check("pdf read 内容", out and "办公文档转换样本" in all_text, "")
+    out = expect_ok("pdf read --pages 1", "pdf", "read", "-f", pdf_path,
+                    "--pages", "1")
+    check("pdf read 只取 1 页", out and len(out["pages"]) == 1, str(out))
+
+    two_pdf = wpath("two.pdf")
+    out = expect_ok("pdf merge", "pdf", "merge", "-f", pdf_path, pdf_path,
+                    "--out", two_pdf)
+    out = expect_ok("pdf merge 页数", "pdf", "info", "-f", two_pdf)
+    check("merge 页数翻倍", out and out["pages"] == n_pdf * 2, str(out))
+    code, _, _ = run("pdf", "merge", "-f", pdf_path, pdf_path)
+    check("pdf merge 缺 --out 报错", code == 2, f"code={code}")
+
+    split_dir = wpath("split")
+    os.makedirs(split_dir, exist_ok=True)
+    out = expect_ok("pdf split 全部", "pdf", "split", "-f", two_pdf,
+                    "--out-dir", split_dir)
+    files = [f for f in os.listdir(split_dir) if f.lower().endswith(".pdf")]
+    check("split 文件数=页数", out and len(files) == n_pdf * 2, str(files))
+    for f in files:
+        os.remove(os.path.join(split_dir, f))
+    out = expect_ok("pdf split 指定页", "pdf", "split", "-f", two_pdf,
+                    "--pages", "1,2", "--out-dir", split_dir)
+    files = [f for f in os.listdir(split_dir) if f.lower().endswith(".pdf")]
+    check("split 指定页数", out and len(files) == 2, str(files))
+    for f in files:
+        os.remove(os.path.join(split_dir, f))
+
+    rot = wpath("rot.pdf")
+    expect_ok("pdf rotate", "pdf", "rotate", "-f", two_pdf, "--angle", "90",
+              "--out", rot)
+    out = expect_ok("pdf rotate 后 info", "pdf", "info", "-f", rot)
+    rfp = (out or {}).get("first_page") or {}
+    check("rotate 变横向", out and rfp["width_mm"] > rfp["height_mm"],
+          str(rfp))
+
+    enc = wpath("enc.pdf")
+    expect_ok("pdf encrypt", "pdf", "encrypt", "-f", two_pdf,
+              "--password", "pw123", "--out", enc)
+    out = expect_ok("pdf info 加密文件", "pdf", "info", "-f", enc)
+    check("encrypted 状态", out and out["encrypted"] is True
+          and out["pages"] is None, str(out))
+    expect_err("pdf read 加密文件", "encrypted", "pdf", "read", "-f", enc)
+    expect_err("pdf encrypt 二次加密", "encrypted", "pdf", "encrypt", "-f",
+               enc, "--password", "x", "--out", wpath("e2.pdf"))
+    expect_err("pdf decrypt 错密码", "bad_password", "pdf", "decrypt", "-f",
+               enc, "--password", "wrong", "--out", wpath("d1.pdf"))
+    expect_ok("pdf decrypt", "pdf", "decrypt", "-f", enc,
+              "--password", "pw123", "--out", wpath("d2.pdf"))
+    expect_err("pdf decrypt 未加密", "not_encrypted", "pdf", "decrypt", "-f",
+               two_pdf, "--password", "pw123", "--out", wpath("d3.pdf"))
+
+    wm = wpath("wm.pdf")
+    out = expect_ok("pdf watermark", "pdf", "watermark", "-f", pdf_path,
+                    "--text", "内部资料", "--out", wm)
+    check("watermark 返回", out and out["watermarked_pages"] == n_pdf, str(out))
+    img_dir2 = wpath("pdimg")
+    out = expect_ok("pdf to-image", "pdf", "to-image", "-f", pdf_path,
+                    "--out-dir", img_dir2, "--dpi", "100")
+    pngs = [f for f in os.listdir(img_dir2) if f.endswith(".png")]
+    check("to-image 产物", out and len(pngs) == n_pdf, str(pngs))
+    out = expect_ok("pdf images 提取", "pdf", "images", "-f", pdf_path,
+                    "--out-dir", wpath("pdimgs"))
+    check("pdf 内嵌图", out and out["count"] >= 1, str(out))
+    # 无图 PDF: 纯文字 md 渲染(避免 two.pdf 内含 logo 误命中)
+    plain_md = wpath("plain.md")
+    with open(plain_md, "w", encoding="utf-8") as fh:
+        fh.write("# 纯文本页\n\n没有任何图片的文档。\n")
+    noimg_pdf = wpath("noimg.pdf")
+    expect_ok("md to-pdf 纯文本", "md", "to-pdf", "-f", plain_md,
+              "--out", noimg_pdf)
+    expect_err("pdf images 无图报错", "no_images", "pdf", "images", "-f",
+               noimg_pdf, "--out-dir", wpath("pdimgs2"))
+
+    # ======================================================================
+    # convert 跨格式(WPS 引擎部分)
+    # ======================================================================
+    out = expect_ok("convert docx→pdf(WPS)", "convert", "-f", sample_docx,
+                    "--out", wpath("w.pdf"))
+    out = expect_ok("convert pdf→docx", "convert", "-f", two_pdf, "--to",
+                    "docx", "--out", wpath("pdf2.docx"))
+    check("pdf2docx 引擎", out and out.get("engine") == "pdf2docx", str(out))
+    expect_ok("convert docx→md", "convert", "-f", sample_docx, "--to", "md",
+              "--out", wpath("doc2.md"))
+    with open(wpath("doc2.md"), encoding="utf-8") as fh:
+        d2m_txt = fh.read()
+    check("docx→md 标题", "Word 样本文档" in d2m_txt, "")
+    expect_err("convert 未知扩展", "unsupported_format", "convert", "-f",
+               sample_md, "--to", "xyz", "--out", wpath("a.xyz"))
+    if os.path.exists(legacy_xls):
+        out = expect_ok("convert xls→xlsx(WPS)", "convert", "-f", legacy_xls,
+                        "--out", wpath("legacy_new.xlsx"))
+        check("xls 转换警告", out and any("WPS" in w or "升级" in w
+                                          for w in out.get("warnings", [])),
+              str(out))
+    if os.path.exists(legacy_doc):
+        out = expect_ok("convert doc→pdf(WPS)", "convert", "-f", legacy_doc,
+                        "--out", wpath("ld.pdf"))
 
     # ---------- 汇总 ----------
     print()

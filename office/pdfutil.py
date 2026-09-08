@@ -96,8 +96,10 @@ def parse_pages(text: str | None, page_count: int) -> list[int]:
 
 
 def page_size_mm(page) -> dict:
-    """页尺寸:pt 与 mm(1pt = 25.4/72mm)。"""
+    """页尺寸:pt 与 mm(1pt = 25.4/72mm);应用 /Rotate 后的视觉方向。"""
     w, h = page.mediabox.width, page.mediabox.height
+    if int(getattr(page, "rotation", 0) or 0) % 180:
+        w, h = h, w
     return {"width_pt": round(float(w), 2), "height_pt": round(float(h), 2),
             "width_mm": round(float(w) * 25.4 / 72, 1),
             "height_mm": round(float(h) * 25.4 / 72, 1)}

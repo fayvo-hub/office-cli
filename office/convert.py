@@ -234,7 +234,7 @@ def _ok(args, rows: list[list], warnings: list[str]) -> dict:
 
 def _unsupported(src_ext: str, dst_ext: str) -> CliError:
     return CliError(
-        "unsupported",
+        "unsupported_format",
         f"不支持 {src_ext} -> {dst_ext} 转换。支持方向见 office convert --help:"
         f"xlsx/csv/json 互转、xls/xlsx、doc/docx/pdf、docx/md、pdf/docx、md/pdf|docx|html")
 
@@ -399,6 +399,25 @@ def _write_text(path: str, text: str) -> None:
         raise CliError("write_failed", f"写入 {path} 失败: {e}") from e
 
 
+def _silence_stdout():
+    """临时把进程 fd1 指向 devnull(供会 print 到 stdout 的第三方导入使用)。"""
+    import contextlib
+    import io
+
+    @contextlib.contextmanager
+    def _cm():
+        old_fd = os.dup(1)
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        try:
+            yield
+        finally:
+            os.dup2(old_fd, 1)
+            os.close(devnull)
+            os.close(old_fd)
+    return _cm()
+
+
 # ---------------------------------------------------------------------------
 # 内部:PDF -> docx
 # ---------------------------------------------------------------------------
@@ -407,7 +426,8 @@ def _pdf_to_docx(src: str, dst: str) -> None:
     if not os.path.exists(src):
         raise CliError("no_file", f"文件不存在: {src}")
     try:
-        from pdf2docx import Converter
+        with _silence_stdout():  # pdf2docx 导入时 fitz deprecation 会 print 到 stdout
+            from pdf2docx import Converter
     except ImportError:  # pragma: no cover
         raise CliError("need_dep", "pdf->docx 需要 pdf2docx 库,请安装: pip install pdf2docx") from None
     conv = None

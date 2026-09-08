@@ -209,6 +209,8 @@ def make_sample_docx() -> str:
     with open(cfg, "w", encoding="utf-8") as fh:
         json.dump({"blocks": blocks}, fh, ensure_ascii=False)
     out = os.path.join(SAMPLES, "sample.docx")
+    if os.path.exists(out):
+        os.remove(out)  # word write --create 对已存在文件是追加语义, 先清旧
     proc = subprocess.run(
         [sys.executable, "-m", "office", "word", "write", "-f", out,
          "--data-file", cfg, "--create"],

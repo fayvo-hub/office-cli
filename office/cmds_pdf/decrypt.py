@@ -41,11 +41,15 @@ def run(args: argparse.Namespace) -> dict:
     except ImportError:  # pragma: no cover
         raise CliError("need_dep", "需要 pypdf 库: pip install pypdf") from None
     try:
-        reader.decrypt(args.password)
+        rc = reader.decrypt(args.password)
     except FileNotDecryptedError:
-        raise CliError("bad_password", "密码错误,无法解密(请确认密码后重试)") from None
-    except Exception as e:
-        raise CliError("bad_password", f"解密失败: {e}") from e
+        rc = 0
+    if not rc:
+        try:
+            reader.stream.close()
+        except Exception:
+            pass
+        raise CliError("bad_password", "密码错误,无法解密(请确认密码后重试)")
     try:
         writer = PdfWriter()
         for page in reader.pages:
