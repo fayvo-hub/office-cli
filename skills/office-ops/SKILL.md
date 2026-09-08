@@ -62,7 +62,7 @@ office md to-docx -f 说明.md --out 说明.docx
 office md to-html -f 说明.md --out 说明.html
 office convert -f 说明.md --to pdf --out 说明.pdf # 等价
 ```
-支持标题层级/表格/引用/图片(md 同目录相对路径)/代码块高亮/mermaid 代码块。h1 标题自动另起页。
+支持标题层级/表格/引用/图片(md 同目录相对路径)/代码块高亮/mermaid 代码块;A4 排版带页码。
 
 ### 跨格式转换(顶层 convert,方向自动判定)
 ```bash

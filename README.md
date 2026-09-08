@@ -147,7 +147,7 @@ office md to-docx -f README.md --out README.docx
 office md to-html -f README.md --out README.html
 ```
 
-支持:标题层级、表格、代码高亮、引用、图片(相对 md 目录)、**mermaid 图**(graph TD 等,依赖本地 Chrome 渲染)。标题 1 级自动分页。
+支持:标题层级、表格、代码高亮、引用、图片(相对 md 目录)、**mermaid 图**(graph TD 等,依赖本地 Chrome 渲染);A4 页面带页码。
 
 ### convert 跨格式矩阵
 
