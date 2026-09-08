@@ -17,10 +17,10 @@ HELP = "向单元格/区域写入数据(支持公式),原子保存"
 DESCRIPTION = """向单元格/区域写入数据(支持公式),写入成功后原子替换原文件。
 
 用法示例:
-  xcli write -f demo.xlsx --cell B2 --data 42
-  xcli write -f demo.xlsx --sheet 销售 --cell A1 --data-file values.json
-  xcli write -f demo.xlsx --cell A1 --data '[[\"a\",1],[\"b\",2]]'
-  xcli write -f new.xlsx --cell A1 --data '[[\"x\",\"=B1*2\"]]' --create
+  office write -f demo.xlsx --cell B2 --data 42
+  office write -f demo.xlsx --sheet 销售 --cell A1 --data-file values.json
+  office write -f demo.xlsx --cell A1 --data '[[\"a\",1],[\"b\",2]]'
+  office write -f new.xlsx --cell A1 --data '[[\"x\",\"=B1*2\"]]' --create
 
 --data 的 JSON 形状约定(三种):
   标量    42 / "hello"               -> 写单个单元格(--cell 指定)

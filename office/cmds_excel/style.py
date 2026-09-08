@@ -15,9 +15,9 @@ HELP = "设置区域样式:字体/填充/对齐/边框/数字格式"
 DESCRIPTION = """给指定区域设置样式(只改样式,不动数据)。未给出的选项保持原样。
 
 用法示例:
-  xcli style -f demo.xlsx --range A1:F1 --bold --fill FFFF00 --align center
-  xcli style -f demo.xlsx --sheet 销售 --range A2:A13 --num-format '0.00%'
-  xcli style -f demo.xlsx --range A1:F13 --border thin --border-color 999999
+  office style -f demo.xlsx --range A1:F1 --bold --fill FFFF00 --align center
+  office style -f demo.xlsx --sheet 销售 --range A2:A13 --num-format '0.00%'
+  office style -f demo.xlsx --range A1:F13 --border thin --border-color 999999
 
 选项:
   字体:   --font-name 微软雅黑 | --font-size 12 | --bold [true] | --italic | --underline

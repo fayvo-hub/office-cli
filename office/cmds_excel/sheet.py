@@ -13,11 +13,11 @@ HELP = "工作表管理:add / rename / remove / copy / active"
 DESCRIPTION = """工作表管理(不触碰单元格内容)。
 
 子命令:
-  xcli sheet add    -f f.xlsx --name 新表 [--index 1]
-  xcli sheet rename -f f.xlsx --name 旧名 --new-name 新名
-  xcli sheet remove -f f.xlsx --name 表名        (最后一个表不可删除)
-  xcli sheet copy   -f f.xlsx --name 源表 --new-name 副本名
-  xcli sheet active -f f.xlsx --name 表名        (设置打开时默认显示的表)
+  office sheet add    -f f.xlsx --name 新表 [--index 1]
+  office sheet rename -f f.xlsx --name 旧名 --new-name 新名
+  office sheet remove -f f.xlsx --name 表名        (最后一个表不可删除)
+  office sheet copy   -f f.xlsx --name 源表 --new-name 副本名
+  office sheet active -f f.xlsx --name 表名        (设置打开时默认显示的表)
 
 输出 JSON: {"ok": true, "file": "...", "action": "...", "sheets": ["当前全部表名"]}
 """

@@ -13,8 +13,8 @@ HELP = "数据透视表:list 列出 / set-source 修改数据源范围"
 DESCRIPTION = """数据透视表操作(openpyxl ≥3.1 可读可写已有透视表,但**不能凭空创建**)。
 
 用法示例:
-  xcli pivot list -f demo.xlsx
-  xcli pivot set-source -f demo.xlsx --name 数据透视表1 --ref A1:D500
+  office pivot list -f demo.xlsx
+  office pivot set-source -f demo.xlsx --name 数据透视表1 --ref A1:D500
 
 子命令:
   pivot list        列出工作簿内所有透视表:名称、所在表、位置、数据源范围

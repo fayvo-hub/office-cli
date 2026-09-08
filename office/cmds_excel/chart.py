@@ -15,8 +15,8 @@ HELP = "插入图表:bar(横条)/col(柱状)/line(折线)/pie(饼图)"
 DESCRIPTION = """在表中插入基础图表(openpyxl 创建,Excel/WPS 可直接查看编辑)。
 
 用法示例:
-  xcli chart add -f demo.xlsx --type col --data A1:C8 --at E2 --title "月度销量"
-  xcli chart add -f demo.xlsx --type pie --data A1:B13 --title "占比"
+  office chart add -f demo.xlsx --type col --data A1:C8 --at E2 --title "月度销量"
+  office chart add -f demo.xlsx --type pie --data A1:B13 --title "占比"
 
 数据区约定(--data):
 - 第一列 = 类别(如月份/姓名),其余每列 = 一个数据系列

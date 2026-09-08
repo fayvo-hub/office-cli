@@ -14,10 +14,10 @@ HELP = "读取单元格/区域/整表,输出 JSON(默认行数组,公式格显�
 DESCRIPTION = """读取单元格/区域/整表并输出 JSON。
 
 用法示例:
-  xcli read -f demo.xlsx                        # 读激活表全部数据
-  xcli read -f demo.xlsx --sheet 销售 --range A1:F13
-  xcli read -f demo.xlsx --range B2             # 单个单元格
-  xcli read -f demo.xlsx --range A1:C10 --cached   # 公式格显示计算结果(需文件有缓存)
+  office read -f demo.xlsx                        # 读激活表全部数据
+  office read -f demo.xlsx --sheet 销售 --range A1:F13
+  office read -f demo.xlsx --range B2             # 单个单元格
+  office read -f demo.xlsx --range A1:C10 --cached   # 公式格显示计算结果(需文件有缓存)
 
 输出结构(rows 模式):
 {

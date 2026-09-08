@@ -14,9 +14,9 @@ HELP = "插入图片到工作表(需要 Pillow:pip install Pillow)"
 DESCRIPTION = """把图片文件插入到工作表的指定位置。
 
 用法示例:
-  xcli image add -f demo.xlsx --image logo.png --at B2
-  xcli image add -f demo.xlsx --image photo.jpg --at C5 --width 300   # 按像素等比缩放
-  xcli image add -f demo.xlsx --image pic.png --at A1 --scale 0.5     # 按比例缩放
+  office image add -f demo.xlsx --image logo.png --at B2
+  office image add -f demo.xlsx --image photo.jpg --at C5 --width 300   # 按像素等比缩放
+  office image add -f demo.xlsx --image pic.png --at A1 --scale 0.5     # 按比例缩放
 
 说明:
 - 需要 Pillow 支持(pip install Pillow);png/jpg/gif/webp 等常见格式均可

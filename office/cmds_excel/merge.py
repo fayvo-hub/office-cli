@@ -16,9 +16,9 @@ HELP = "合并 / 取消合并单元格区域"
 DESCRIPTION = """合并 / 取消合并单元格区域。
 
 用法示例:
-  xcli merge -f demo.xlsx --range A1:B2                # 合并
-  xcli merge -f demo.xlsx --range A1:B2 --center       # 合并并让内容水平垂直居中
-  xcli merge -f demo.xlsx --range A1:B2 --unmerge      # 取消合并
+  office merge -f demo.xlsx --range A1:B2                # 合并
+  office merge -f demo.xlsx --range A1:B2 --center       # 合并并让内容水平垂直居中
+  office merge -f demo.xlsx --range A1:B2 --unmerge      # 取消合并
 
 注意:
 - 合并后数据只保留左上角格:openpyxl 执行合并时会自动清除区域内其它格的值,
