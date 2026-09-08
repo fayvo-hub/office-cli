@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# 测试与运行产物
+.test-data/
+*.tmp.xlsx
+*.tmp.csv
+
+# 样例缓存文件(可重新生成)
