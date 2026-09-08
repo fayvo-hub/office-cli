@@ -69,8 +69,8 @@ def docx_to_pdf(src: str, dst: str) -> None:
     doc = None
     try:
         doc = app.Documents.Open(src, ReadOnly=True)
-        # 0 = wdExportFormatPDF
-        doc.ExportAsFixedFormat(0, dst)
+        # (文件名, 17=wdExportFormatPDF) —— WPS KWPS 以文件名为第一参数
+        doc.ExportAsFixedFormat(dst, 17)
         doc.Close(False)
         doc = None
     finally:
@@ -92,7 +92,7 @@ def doc_to_pdf(src: str, dst: str) -> None:
             doc.Close(False)
             doc = None
             doc2 = app.Documents.Open(tmp_docx, ReadOnly=True)
-            doc2.ExportAsFixedFormat(0, dst)
+            doc2.ExportAsFixedFormat(dst, 17)
             doc2.Close(False)
             doc2 = None
         finally:

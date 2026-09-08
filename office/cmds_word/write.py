@@ -230,6 +230,8 @@ def _mono(run) -> None:
 
 
 def _style_para(p, b: dict, Pt, RGBColor, WD_ALIGN_PARAGRAPH) -> None:
+    from docx.shared import Cm
+
     align = b.get("align")
     if align:
         p.alignment = {"left": WD_ALIGN_PARAGRAPH.LEFT,

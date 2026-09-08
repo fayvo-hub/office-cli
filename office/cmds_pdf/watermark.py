@@ -76,11 +76,12 @@ def run(args: argparse.Namespace) -> dict:
             # 居中:文字近似占位
             pos = pymupdf.Point((r.width - text_w) / 2, (r.height + size * 0.35) / 2)
             tw.append(pos, args.text, font=font, fontsize=size)
+            center = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
             if args.no_rotate:
                 tw.write_text(page, color=(0.45, 0.45, 0.45), opacity=args.opacity)
             else:
                 tw.write_text(page, color=(0.45, 0.45, 0.45), opacity=args.opacity,
-                              morph=(r.center, pymupdf.Matrix(45, 45)))
+                              morph=(center, pymupdf.Matrix(45, 45)))
             n += 1
         out = args.out or args.file
         if os.path.abspath(out) == os.path.abspath(args.file):

@@ -179,8 +179,93 @@ def make_logo() -> None:
     img.save(os.path.join(SAMPLES, "logo.png"))
 
 
+def make_sample_docx() -> str:
+    """用 office CLI 的 word write 生成 sample.docx(样本本身即产物)。"""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    blocks = [
+        {"type": "h", "level": 1, "text": "Word 样本文档"},
+        {"type": "p", "text": "这是由 office word write 生成的样本,包含下列元素。"},
+        {"type": "h", "level": 2, "text": "混合段落"},
+        {"type": "p", "runs": [
+            {"text": "普通文本+"},
+            {"text": "加粗", "bold": True},
+            {"text": "与"},
+            {"text": "红字", "color": "FF0000"},
+            {"text": "。"}]},
+        {"type": "code", "text": "def add(a, b):\n    return a + b"},
+        {"type": "quote", "text": "引用样式段落。"},
+        {"type": "h", "level": 2, "text": "表格"},
+        {"type": "table", "header": True,
+         "rows": [["姓名", "城市"], ["张三", "北京"], ["李四", "上海"]]},
+        {"type": "h", "level": 2, "text": "图片"},
+        {"type": "img", "path": str(Path(SAMPLES) / "logo.png"), "width": 6},
+    ]
+    cfg = os.path.join(SAMPLES, "..", ".test-tmp", "sample_blocks.json")
+    os.makedirs(os.path.dirname(cfg), exist_ok=True)
+    with open(cfg, "w", encoding="utf-8") as fh:
+        json.dump({"blocks": blocks}, fh, ensure_ascii=False)
+    out = os.path.join(SAMPLES, "sample.docx")
+    proc = subprocess.run(
+        [sys.executable, "-m", "office", "word", "write", "-f", out,
+         "--data-file", cfg, "--create"],
+        capture_output=True, text=True, encoding="utf-8",
+        cwd=os.path.dirname(HERE), timeout=60)
+    os.remove(cfg)
+    if proc.returncode != 0:
+        raise RuntimeError(f"word write 失败: {proc.stdout} {proc.stderr}")
+    print("sample.docx saved")
+    return out
+
+
+def make_legacy_samples() -> None:
+    """用 WPS 把新格式另存为 .xls/.doc 老格式样本(WPS 可用时)。"""
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        print("skip legacy samples (no pywin32)")
+        return
+    pythoncom.CoInitialize()
+    xls_dst = os.path.join(SAMPLES, "legacy.xls")
+    doc_dst = os.path.join(SAMPLES, "legacy.doc")
+    try:
+        app = win32com.client.DispatchEx("KET.Application")
+        app.Visible = False
+        app.DisplayAlerts = 0
+        try:
+            wb = app.Workbooks.Open(os.path.join(SAMPLES, "demo.xlsx"),
+                                    ReadOnly=True)
+            wb.SaveAs(xls_dst, FileFormat=56)  # 56 = .xls
+            wb.Close(False)
+        finally:
+            app.Quit()
+        print("legacy.xls saved")
+    except Exception as e:
+        print(f"skip legacy.xls (WPS KET 不可用: {e})")
+    try:
+        app = win32com.client.DispatchEx("KWPS.Application")
+        app.Visible = False
+        app.DisplayAlerts = 0
+        try:
+            d = app.Documents.Open(os.path.join(SAMPLES, "sample.docx"),
+                                   ReadOnly=True)
+            d.SaveAs(doc_dst, FileFormat=0)  # 0 = .doc
+            d.Close(False)
+        finally:
+            app.Quit()
+        print("legacy.doc saved")
+    except Exception as e:
+        print(f"skip legacy.doc (WPS KWPS 不可用: {e})")
+
+
 if __name__ == "__main__":
     make_demo_xlsx()
     make_csvs()
     make_logo()
+    make_sample_docx()
+    make_legacy_samples()
     print("samples ready in", SAMPLES)
