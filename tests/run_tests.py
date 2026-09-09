@@ -103,8 +103,10 @@ def main() -> int:
     pivot_f = copy_sample("demo_pivot.xlsx")
     sample_md = copy_sample("sample.md")
     sample_docx = copy_sample("sample.docx")
+    sample_pptx = copy_sample("sample.pptx")
     legacy_xls = os.path.join(SAMPLES, "legacy.xls")
     legacy_doc = os.path.join(SAMPLES, "legacy.doc")
+    legacy_ppt = os.path.join(SAMPLES, "legacy.ppt")
 
     # ---------- list ----------
     out = expect_ok("list 基本", "list", "-f", demo)
@@ -757,6 +759,82 @@ def main() -> int:
     if os.path.exists(legacy_doc):
         out = expect_ok("convert doc→pdf(WPS)", "convert", "-f", legacy_doc,
                         "--out", wpath("ld.pdf"))
+
+    # ======================================================================
+    # ppt 组(python-pptx 读写;WPS KWPP 相关需 legacy.ppt 样本存在)
+    # ======================================================================
+    out = expect_ok("ppt read 全量", "ppt", "read", "-f", sample_pptx)
+    slides = (out or {}).get("slides") or []
+    check("ppt read 页数", out and out["slides_total"] == 4
+          and len(slides) == 4, str(out))
+    s2 = slides[1] if len(slides) > 1 else {}
+    check("ppt read 标题", s2.get("title") == "进展摘要", str(s2))
+    t1 = (s2.get("texts") or [])[0]
+    check("ppt read 文本", s2 and "需求评审完成" in str(t1), str(s2))
+    check("ppt read 层级", any(isinstance(x, dict)
+                                and x.get("level") == 1
+                                and "覆盖 3 个部门" in x.get("text", "")
+                                for x in (s2.get("texts") or [])), str(s2))
+    check("ppt read 备注", s2.get("notes") == "强调时间点", str(s2))
+    s3 = slides[2] if len(slides) > 2 else {}
+    tab = (s3.get("tables") or [[]])[0]
+    check("ppt read 表格", tab and tab[0] == ["指标", "Q1", "Q2"]
+          and tab[2] == ["用户", "10", "22"], str(s3))
+    s4 = slides[3] if len(slides) > 3 else {}
+    check("ppt read 图片计数", s4 and s4.get("pictures", 0) >= 1, str(s4))
+    out = expect_ok("ppt read 单页", "ppt", "read", "-f", sample_pptx,
+                    "--slide", "2")
+    check("ppt read 单页结构", out and out["pages"] == 1
+          and out["slides"][0]["title"] == "进展摘要", str(out))
+    expect_err("ppt read 页越界", "bad_args", "ppt", "read", "-f",
+               sample_pptx, "--slide", "9")
+    out = expect_ok("ppt read 导出图片", "ppt", "read", "-f", sample_pptx,
+                    "--save-images", wpath("ppt_imgs"))
+    check("ppt read 图片文件", out and len(out.get("images_saved") or []) >= 1
+          and os.path.exists(os.path.join(wpath("ppt_imgs"),
+                                          out["images_saved"][0])),
+          str(out))
+
+    def _ppt_json(name: str, obj) -> str:
+        p = wpath(name)
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(obj, fh, ensure_ascii=False)
+        return p
+
+    pj = _ppt_json("newppt.json", {"slides": [
+        {"layout": "title", "title": "新建标题", "notes": "备注A"},
+        {"layout": "title-content", "title": "要点页",
+         "bullets": ["一", {"text": "一甲", "level": 1}]},
+    ]})
+    np_ = wpath("new.pptx")
+    out = expect_ok("ppt write 新建", "ppt", "write", "-f", np_,
+                    "--create", "--data-file", pj)
+    check("ppt write 新建页数", out and out["slides_added"] == 2
+          and out["created"] is True, str(out))
+    out = expect_ok("ppt write 追加", "ppt", "write", "-f", np_,
+                    "--data-file", pj)
+    check("ppt write 追加页数", out and out["slides_added"] == 2
+          and out["created"] is False, str(out))
+    out = expect_ok("ppt write 后读回", "ppt", "read", "-f", np_)
+    check("ppt write 总页数", out and out["slides_total"] == 4, str(out))
+    chk = (out or {}).get("slides") or []
+    check("ppt write 标题回读", chk and chk[0].get("title") == "新建标题"
+          and chk[0].get("notes") == "备注A", str(chk and chk[0]))
+    expect_err("ppt write 缺文件", "no_file", "ppt", "write", "-f",
+               wpath("ghost.pptx"), "--data-file", pj)
+    expect_err("ppt write 坏 JSON 结构", "bad_args", "ppt", "write",
+               "-f", np_, "--data-file",
+               _ppt_json("bad.json", {"slides": []}))
+    if os.path.exists(legacy_ppt):
+        out = expect_ok("ppt read legacy.ppt 升级", "ppt", "read", "-f",
+                        legacy_ppt)
+        check("legacy.ppt 页数", out and out["slides_total"] == 4, str(out))
+        out = expect_ok("ppt to-pdf(WPS)", "ppt", "to-pdf", "-f",
+                        sample_pptx, "--out", wpath("ppt_out.pdf"))
+        check("ppt to-pdf 产物", out and out.get("pages")
+              and os.path.exists(wpath("ppt_out.pdf")), str(out))
+        expect_ok("ppt to-pdf 老格式", "ppt", "to-pdf", "-f", legacy_ppt,
+                  "--out", wpath("ppt_old.pdf"))
 
     # ---------- 汇总 ----------
     print()

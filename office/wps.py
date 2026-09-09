@@ -8,6 +8,8 @@ WPS 崩溃/卡死不会拖垮命令行。转换过程不弹窗(Visible=False)。
   .doc  -> .docx      (KWPS 文字)
   .docx -> .pdf       (KWPS 导出 PDF,排版 100% 保真)
   .doc  -> .pdf       (内部先转 docx)
+  .ppt  -> .pptx      (KWPP 演示)
+  .pptx/.ppt -> .pdf  (KWPP 导出 PDF)
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ _probe_cache: bool | None = None
 _probe_cache_checked: bool | None = None
 
 # 转换完成后原样保留(供本进程内后续步骤复用)的临时文件前缀
-_KEEP_PREFIXES = (".office-xls-", ".office-doc-")
+_KEEP_PREFIXES = (".office-xls-", ".office-doc-", ".office-ppt-")
 
 
 def _run_worker(job: dict, timeout: int = _DEFAULT_TIMEOUT) -> dict:
@@ -78,12 +80,16 @@ def convert(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
         (".doc", ".docx"): "doc_to_docx",
         (".docx", ".pdf"): "docx_to_pdf",
         (".doc", ".pdf"): "doc_to_pdf",
+        (".ppt", ".pptx"): "ppt_to_pptx",
+        (".pptx", ".pdf"): "pptx_to_pdf",
+        (".ppt", ".pdf"): "ppt_to_pdf",
     }.get((s_ext, d_ext))
     if op is None:
         raise CliError(
             "unsupported",
             f"WPS 转换不支持 {s_ext} -> {d_ext};"
-            f"支持: .xls->.xlsx、.doc->.docx、.doc/.docx->.pdf",
+            f"支持: .xls->.xlsx、.doc->.docx、.doc/.docx->.pdf、"
+            f".ppt->.pptx、.pptx/.ppt->.pdf",
         )
     if not os.path.exists(src):
         raise CliError("no_file", f"文件不存在: {src}")
@@ -91,6 +97,6 @@ def convert(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
 
 
 def is_legacy(path: str, ext: str | None = None) -> bool:
-    """是否为旧版办公格式(.xls/.doc)"""
+    """是否为旧版办公格式(.xls/.doc/.ppt)"""
     e = (ext or os.path.splitext(path)[1]).lower()
-    return e in (".xls", ".doc")
+    return e in (".xls", ".doc", ".ppt")

@@ -53,6 +53,16 @@ def word_plan(path: str, *, write: bool = True) -> IoPlan:
     return IoPlan(tmp, final, path)
 
 
+def ppt_plan(path: str, *, write: bool = True) -> IoPlan:
+    """PPT 文件计划:.ppt 老格式 -> 升级 .pptx。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext != ".ppt":
+        return IoPlan(path, path if write else None)
+    tmp = _upgrade(path, ".ppt", ".pptx", kind="ppt")
+    final = os.path.splitext(path)[0] + ".pptx" if write else None
+    return IoPlan(tmp, final, path)
+
+
 def _upgrade(src: str, src_ext: str, dst_ext: str, kind: str) -> str:
     """把老格式文件升级为同内容的新格式临时文件(进程内缓存)。"""
     abs_src = os.path.abspath(src)

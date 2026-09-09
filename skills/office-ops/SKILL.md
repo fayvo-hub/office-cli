@@ -97,18 +97,36 @@ office excel chart add -f 表.xlsx --type bar --data A1:B6 --at F2 --title 季�
 office excel image add -f 表.xlsx --image logo.png --at D2 --scale 0.5   # --width px 与 --scale 二选一; 默认锚 A1
 office excel pivot list -f 表.xlsx               # 透视表清单(名称/所在表/数据源范围); 只能操作已存在的透视表,不能新建
 office excel pivot set-source -f 表.xlsx --name 表 --ref A1:F100  # 改数据源(须含表头); 默认设 refreshOnLoad, --no-refresh 关闭
+office excel layout -f 表.xlsx --range A:B --col-width 20      # 列宽(单位英寸); --range 1:1 --row-height 30 行高(磅)
+office excel layout -f 表.xlsx --range 1:3 --hide              # --show/--hide 行显隐; --freeze B2 冻结窗格; --print-area A1:F30 打印区域
+office excel cond-format -f 表.xlsx --range C2:C20 --type color-scale   # color-scale色阶/data-bar数据条/icon-set图标/rule公式规则(--formula)
+office excel cond-format -f 表.xlsx --list                     # 列出条件格式; --clear 清除指定(或全部)
+office excel comment add -f 表.xlsx --cell B2 --text '备注'    # add/update/remove/list
+
+office excel validate add -f 表.xlsx --range D2:D20 --list '甲,乙,丙'   # 下拉列表(逗号分隔); 也可 --formula '=Sheet1!$A$1:$A$9' 引用区域
+office excel validate list -f 表.xlsx                         # 列出验证规则; clear 按相交范围移除(--range/--cell)
+office excel insert -f 表.xlsx --axis rows --at 3 --count 2    # 插 2 行到第 3 行前(axis cols 同理); 默认仅移位,
+                                                                 #  --shift 0 保留原样
+
+office excel delete -f 表.xlsx --axis rows --at 3 --count 2    # 删 2 行(contents 清内容/rows 删行/cols 删列)
+office excel replace -f 表.xlsx --find 旧 --replace 新         # 查找替换; --in values|formulas|comments(默认值); --sheet 可选;
+                                                                 #  --count-only 只报命中; --find-file/--replace-file 传 JSON 数组多对
 ```
 要点:
 - write 是**覆盖式**:从 `--cell` 起点(默认 A1)直接写,会**覆盖原区域内容**;想追加到末尾须先 read 算出空行再指定 `--cell`。一维数组自上而下成列,二维按矩形写。
 - 值约定:null 清格;true/false 写布尔;`=` 开头的字符串按公式(如 `"=SUM(A1:A9)"`),想存为文本加 `--literal`;日期给 ISO 字符串(如 `2024-03-05T00:00:00`)。
 - 合并区内写入报 `merged_cell`(只能写左上角);read 的公式格默认输出公式文本,加 `--cached` 取缓存值(openpyxl 写出的文件一般无缓存,取不到仍回退公式文本)。
 - style 全部参数: `--font-name --font-size --bold --italic --underline --font-color(hex) --fill(hex|none 清除) --align --valign --wrap --border --border-color --num-format`;布尔参数可写成 `--bold` 或 `--bold true/false`。
+- insert/delete 若撞上合并区/表格/筛选的边界会报 `layout_conflict`(提示先 unmerge/移除表),不会破坏版式;delete rows 默认带 `--shift` 且已含级联移动,切勿对含公式的整表随手删行,公式引用会自动调整但外部引用可能悬空。
+- replace 的 `--in formulas` 会同时搜公式文本与缓存值,替换文本仍保留 `=` 公式前缀;`--in comments` 替换批注文本。
+- validate/comment 的 `add` 覆盖写入;validate 的 `clear` 只移除与给定范围相交的规则。
 
 ### Word(组前缀 word)
 ```bash
 office word read -f 报告.docx                     # 段落/表格/图片元数据; --limit N(默认500,0不限); --no-tables 跳过表格; --save-images DIR 导出图片(默认只列图片清单)
 office word write -f 报告.docx --create --text '标题内容'     # 不存在则新建; 存在=末尾追加
 office word write -f 报告.docx --data-file blocks.json
+office word replace -f 报告.docx --find 旧词 --replace 新词     # 全文替换; --find/--replace 可传 JSON 数组多对,如 '[旧1,旧2]'
 ```
 blocks JSON(顶层 `{"blocks": [...]}`,块类型缺省 p):
 ```json
@@ -124,6 +142,25 @@ blocks JSON(顶层 `{"blocks": [...]}`,块类型缺省 p):
 ]}
 ```
 块说明:h=标题(level 1-9);p 可 `text` 或 `runs[]`(逐段富文本:bold/italic/code 等宽/color 6位hex/size pt,也可块级统一设);code=等宽灰底;quote=斜体+左缩进;table=二维 rows、网格边框、**首行默认加粗**(表头,加 `--no-header` 取消);img=`path`+`width`(单位厘米,默认 15);pagebreak=分页。
+word replace 支持正文/表格/页眉页脚,优先 run 级精确替换(保留样式),跨 run 文本自动合并重建该段(样式取首 run);替换数/失败数在 `summary`。
+
+### PPT(组前缀 ppt,读写 python-pptx,to-pdf 走 WPS)
+```bash
+office ppt read -f 演示.pptx                      # 逐页: title/texts(带 level 层级)/tables(二维数组)/pictures 数/notes; --slide N 单页; --save-images DIR 导出图片
+office ppt write -f 演示.pptx --create --data-file slides.json   # 存在则末尾追加
+```
+slides JSON(顶层 `{"slides": [...]}`):
+```json
+{"slides": [
+  {"layout": "title", "title": "季度汇报", "notes": "口头补充"},
+  {"layout": "title-content", "title": "进展", "bullets": ["一", {"text": "子项", "level": 1}]},
+  {"layout": "blank", "title": "自由页",
+   "texts": [{"text": "文本框", "size_pt": 24, "bold": true, "left_in": 1, "top_in": 2, "width_in": 6}],
+   "table": {"data": [["a", "b"], [1, 2]], "left_in": 1, "top_in": 3, "width_in": 8},
+   "picture": {"path": "logo.png", "left_in": 1, "top_in": 5, "width_in": 3}}
+]}
+```
+要点:layout 只认 `title`/`title-content`/`blank`(或版式序号);含 table/picture/texts 的页自动落 blank;尺寸单位英寸;`.ppt` 老格式自动经 WPS 升级后读写;`ppt to-pdf -f 演示.pptx --out 演示.pdf` 需 WPS。
 
 ### PDF(组前缀 pdf)
 ```bash
@@ -136,8 +173,13 @@ office pdf encrypt -f a.pdf --password 'pw' --out e.pdf   # AES-256; --owner 另
 office pdf watermark -f a.pdf --text '内部资料' --opacity 0.15 --out w.pdf   # --size pt(默认按页高12%自动); --no-rotate 不旋转
 office pdf images -f a.pdf --out-dir imgs/        # 抽内嵌图(命名 p页码-序号); 无图报 no_images
 office pdf to-image -f a.pdf --out-dir png/ --dpi 150 --pages 1   # 整页转 PNG(默认 150dpi, --pages 缺省全部)
+office pdf footer -f a.pdf --text '第 {n} 页/共 {N} 页' --out f.pdf  # 页脚; {n} 页号 {N} 总页数; --top 放页眉; --pages 2-4 只加指定页; --size pt --color hex --start 起始页码
+
+office pdf search -f a.pdf --text '关键词'        # 命中: 页码+上下文片段(每页最长 --ctx 字符); 无命中 no_match
+
+office pdf from-images -f 扫描.pdf --images a.jpg b.png c.webp   # 图片合成 PDF; --dpi 150 缩放; --out-dir d/ 逐张成文件
 ```
-错误码: 已加密操作未解密文件=encrypted;解密密码错=bad_password;文件未加密却 decrypt=not_encrypted。
+错误码: 已加密操作未解密文件=encrypted;解密密码错=bad_password;文件未加密却 decrypt=not_encrypted;search 无命中=no_match。
 
 ### Markdown 排版(md 组,样式/代码高亮/mermaid 图)
 ```bash
@@ -160,6 +202,7 @@ office convert -f 文档.pdf --to docx --out 文档.docx   # pdf2docx 版面还�
 office convert -f 报告.docx --to md --out 报告.md  # docx→md 结构近似
 office convert -f 说明.md --out 说明.pdf           # md→pdf 默认样式(精细控制用 md to-pdf);也可 --css 文件路径定制
 office convert -f 说明.md --out 说明.html          # md→html 同样通 convert
+office convert -f 页面.html --to pdf --out 页面.pdf  # HTML→PDF(Chrome 渲染,同 md to-pdf 引擎;纯文本/CSS 均支持)
 ```
 支持矩阵: xlsx/xlsm/xls→csv|json|xlsx|md|txt(xls 自动升级);csv→xlsx|json|md|txt;json→xlsx|md|txt;doc/docx→pdf(doc 自动升级)、docx→md、doc→docx;pdf→docx;md→pdf|docx|html。CSV→xlsx 会做类型推断(数字/布尔/日期),`--no-infer` 关闭;`--delimiter`/`--encoding` 可强制;输出已存在直接覆盖,输入输出同路径报 same_file。
 

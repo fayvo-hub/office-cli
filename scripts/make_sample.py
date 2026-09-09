@@ -223,8 +223,51 @@ def make_sample_docx() -> str:
     return out
 
 
+def make_sample_pptx() -> str:
+    """用 python-pptx 生成 sample.pptx:标题页/要点(含层级+备注)/表格/图片。"""
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    out = os.path.join(SAMPLES, "sample.pptx")
+    prs = Presentation()
+
+    s = prs.slides.add_slide(prs.slide_layouts[0])
+    s.shapes.title.text = "演示文稿样本"
+
+    s = prs.slides.add_slide(prs.slide_layouts[1])
+    s.shapes.title.text = "进展摘要"
+    body = s.placeholders[1].text_frame
+    body.text = "需求评审完成"
+    p = body.add_paragraph()
+    p.text = "覆盖 3 个部门"
+    p.level = 1
+    p = body.add_paragraph()
+    p.text = "原型已确认"
+    s.notes_slide.notes_text_frame.text = "强调时间点"
+
+    s = prs.slides.add_slide(prs.slide_layouts[5])  # Title Only
+    s.shapes.title.text = "数据一览"
+    gt = s.shapes.add_table(3, 3, Inches(0.6), Inches(1.8),
+                            Inches(8.8), Inches(1.2)).table
+    for r, row in enumerate((("指标", "Q1", "Q2"),
+                             ("收入", "100", "150"),
+                             ("用户", "10", "22"))):
+        for c, v in enumerate(row):
+            gt.cell(r, c).text = str(v)
+
+    s = prs.slides.add_slide(prs.slide_layouts[6])  # Blank
+    box = s.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(8.8), Inches(1))
+    box.text_frame.text = "感谢"
+    s.shapes.add_picture(os.path.join(SAMPLES, "logo.png"),
+                         Inches(4.2), Inches(2.6), width=Inches(1.5))
+
+    prs.save(out)
+    print("sample.pptx saved")
+    return out
+
+
 def make_legacy_samples() -> None:
-    """用 WPS 把新格式另存为 .xls/.doc 老格式样本(WPS 可用时)。"""
+    """用 WPS 把新格式另存为 .xls/.doc/.ppt 老格式样本(WPS 可用时)。"""
     try:
         import pythoncom
         import win32com.client
@@ -234,6 +277,7 @@ def make_legacy_samples() -> None:
     pythoncom.CoInitialize()
     xls_dst = os.path.join(SAMPLES, "legacy.xls")
     doc_dst = os.path.join(SAMPLES, "legacy.doc")
+    ppt_dst = os.path.join(SAMPLES, "legacy.ppt")
     try:
         app = win32com.client.DispatchEx("KET.Application")
         app.Visible = False
@@ -262,6 +306,43 @@ def make_legacy_samples() -> None:
         print("legacy.doc saved")
     except Exception as e:
         print(f"skip legacy.doc (WPS KWPS 不可用: {e})")
+    try:
+        import time
+        app = None
+        pres = None
+        # WPS 三个组件共享宿主进程,前两个 Quit 后 wps.exe 延迟退出;
+        # 期间激活 KWPP 会失败,故重试等待残留进程退出
+        for attempt in range(6):
+            try:
+                app = win32com.client.DispatchEx("KWPP.Application")
+                app.Visible = False
+                app.DisplayAlerts = 0
+                break
+            except Exception:
+                app = None
+                if attempt < 5:
+                    time.sleep(2)
+        if app is None:
+            raise RuntimeError("KWPP 连续 6 次启动失败(WPS 残留进程未退出?)")
+        pres = app.Presentations.Open(
+            os.path.join(SAMPLES, "sample.pptx"), ReadOnly=True)
+        pres.SaveAs(ppt_dst, 1)  # 1 = .ppt
+        pres.Close()
+        pres = None
+        print("legacy.ppt saved")
+    except Exception as e:
+        print(f"skip legacy.ppt (WPS KWPP 不可用: {e})")
+    finally:
+        if pres is not None:
+            try:
+                pres.Close()
+            except Exception:
+                pass
+        if app is not None:
+            try:
+                app.Quit()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
@@ -269,5 +350,6 @@ if __name__ == "__main__":
     make_csvs()
     make_logo()
     make_sample_docx()
+    make_sample_pptx()
     make_legacy_samples()
     print("samples ready in", SAMPLES)

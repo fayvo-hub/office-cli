@@ -1,7 +1,8 @@
 """WPS COM 转换 worker —— 在子进程内执行,防止 COM 卡死主 CLI。
 
 用法: python -m office.wps_worker '<job-json>'
-job: {"op": "xls_to_xlsx"|"doc_to_docx"|"docx_to_pdf"|"doc_to_pdf"|"probe",
+job: {"op": "xls_to_xlsx"|"doc_to_docx"|"docx_to_pdf"|"doc_to_pdf"|
+     "ppt_to_pptx"|"pptx_to_pdf"|"ppt_to_pdf"|"probe",
       "src": "...", "dst": "..."}
 输出到 stdout 的 JSON: {"ok": true} 或 {"ok": false, "error": "..."}
 """
@@ -104,11 +105,55 @@ def doc_to_pdf(src: str, dst: str) -> None:
             pass
 
 
+def ppt_to_pptx(src: str, dst: str) -> None:
+    """.ppt 老格式 -> .pptx(24 = ppSaveAsOpenXMLPresentation)。"""
+    app = _app("KWPP.Application")
+    pres = None
+    try:
+        pres = app.Presentations.Open(os.path.abspath(src), ReadOnly=True)
+        pres.SaveAs(os.path.abspath(dst), 24)
+        pres.Close()
+        pres = None
+    finally:
+        _quit(app)
+
+
+def pptx_to_pdf(src: str, dst: str) -> None:
+    """.pptx -> .pdf(32 = ppSaveAsPDF)。"""
+    _ppt_save_pdf(src, dst)
+
+
+def ppt_to_pdf(src: str, dst: str) -> None:
+    """.ppt 老格式 -> .pdf(直接导出,不经过 pptx)。"""
+    _ppt_save_pdf(src, dst)
+
+
+def _ppt_save_pdf(src: str, dst: str) -> None:
+    app = _app("KWPP.Application")
+    pres = None
+    try:
+        # 目标已存在时 SaveAs 可能弹覆盖确认,先删除
+        try:
+            os.remove(os.path.abspath(dst))
+        except OSError:
+            pass
+        pres = app.Presentations.Open(os.path.abspath(src), ReadOnly=True)
+        # KWPP 的 ExportAsFixedFormat 签名与 MS 不同,SaveAs(路径, 32) 实测可行
+        pres.SaveAs(os.path.abspath(dst), 32)
+        pres.Close()
+        pres = None
+    finally:
+        _quit(app)
+
+
 _OPS = {
     "xls_to_xlsx": xls_to_xlsx,
     "doc_to_docx": doc_to_docx,
     "docx_to_pdf": docx_to_pdf,
     "doc_to_pdf": doc_to_pdf,
+    "ppt_to_pptx": ppt_to_pptx,
+    "pptx_to_pdf": pptx_to_pdf,
+    "ppt_to_pdf": ppt_to_pdf,
 }
 
 

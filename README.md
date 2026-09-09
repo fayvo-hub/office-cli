@@ -88,9 +88,20 @@ office excel merge         # 合并/取消合并单元格
 office excel chart         # bar/col/line/pie 图表
 office excel image         # 插入/删除图片
 office excel pivot         # list/set-source 透视表
+office excel layout        # 布局: 行列尺寸/显隐/冻结窗格/打印区域
+office excel cond-format   # 条件格式(色阶/数据条/图标/规则)
+office excel comment       # 批注增改删
+office excel validate      # 数据验证(下拉)增/查/清
+office excel insert        # 插入行列(合并区/表/筛选自动检查)
+office excel delete        # 删除行列(内容/整行/整列)
+office excel replace       # 查找替换(值/公式/批注)
 office convert             # 跨格式互转, 见下表
 office word read           # 段落/表格/图片元数据(可导出图片)
 office word write          # 新建/追加段落、标题、表格、代码块、图片、分页
+office word replace        # 查找替换(正文/表格/页眉, 跨 run 合并)
+office ppt read            # 页/标题/文本层级/表格/图片/备注(可导出图片)
+office ppt write           # 新建/追加幻灯片(标题/要点/表格/图片/备注)
+office ppt to-pdf          # PPT → PDF(WPS 引擎)
 office pdf info            # 页数/尺寸/加密/元数据(加密文件也能查)
 office pdf read            # 按页提取文本/表格(可选 --tables)
 office pdf merge           # 合并多个 PDF
@@ -99,6 +110,10 @@ office pdf rotate          # 旋转 90/180/270
 office pdf encrypt         # 设置密码(AES-256)  office pdf decrypt
 office pdf watermark       # 对角线文字水印(支持中文)
 office pdf images          # 抽取内嵌图片  office pdf to-image  # 整页转 PNG
+office pdf from-images     # 图片(组)合成 PDF(jpg/png/webp 混排)
+office pdf footer          # 页脚/页码(中英文本, 可指定页)
+office pdf search          # 全文查找(页/命中数/上下文)
+office convert -f 页.html --to pdf  # HTML → PDF(Chrome 渲染)
 office md to-pdf           # Markdown → PDF(样式/代码高亮/mermaid)
 office md to-docx          # Markdown → Word
 office md to-html          # Markdown → 自包含 HTML
@@ -117,6 +132,14 @@ office excel write -f 新表.xlsx --data '[["a","b"]]' --create        # 新建
 office excel sheet copy -f 表.xlsx --name 成绩 --new-name 成绩备份   # 复制 sheet
 office excel style -f 表.xlsx --range A1:E1 --bold --fill '#FFF2CC' --align center
 office excel merge -f 表.xlsx --range A1:C1 --center
+office excel layout -f 表.xlsx --range A:B --col-width 20     # 列宽英寸
+office excel layout -f 表.xlsx --range 1:1 --row-height 30    # 行高磅
+office excel cond-format -f 表.xlsx --range C2:C20 --type color-scale
+office excel comment add -f 表.xlsx --cell B2 --text '备注'
+office excel validate add -f 表.xlsx --range D2:D20 --list '甲,乙,丙'
+office excel insert -f 表.xlsx --axis rows --at 3 --count 2
+office excel delete -f 表.xlsx --axis rows --at 3 --count 2   # 连行列内容
+office excel replace -f 表.xlsx --find 旧值 --replace 新值    # 值/公式/批注
 office excel chart add -f 表.xlsx --type bar --data A1:B6 --at F2 --title 季度
 office excel image add -f 表.xlsx --image logo.png --at D2 --scale 0.5
 office excel pivot set-source -f 表.xlsx --name 数据透视表1 --ref A1:F100
@@ -148,7 +171,21 @@ office word write -f 报告.docx --data-file blocks.json   # 追加
 ```
 
 `word read` 输出段落(`text/style/level`)、表格(带表头样式名)、图片元数据;`--save-images DIR` 导出正文图片。
+`word replace` 用 `--find/--replace`(JSON 文件传字符串数组做多对),支持加粗/斜体等 run 级精确替换;跨 run 文本会自动合并段落重排;命中表格与页眉页脚;`.doc` 同样先升级再操作。
 `.doc` 文件会先经 WPS 升级为 `.docx` 再读/写,原文件不动。
+
+### ppt 组
+
+```bash
+office ppt read -f 演示.pptx                      # 每页 title/texts(含层级)/tables/pictures/notes
+office ppt read -f 演示.pptx --slide 2 --save-images imgs/
+office ppt write -f 演示.pptx --create --data-file slides.json
+office ppt to-pdf -f 演示.pptx --out 演示.pdf    # 走 WPS 引擎
+```
+
+`slides.json`:`{"slides": [{"layout": "title", "title": "季度汇报"}, {"layout": "title-content", "title": "进展", "bullets": ["一", {"text": "子项", "level": 1}], "notes": "备注"}]}`;
+`layout`: `title`(仅标题) / `title-content`(标题+要点,自动选版式) / `blank`(自由摆放,支持 `texts`/`table`/`picture` 坐标尺寸,单位英寸)。
+无 `--create` 时在现有演示文稿末尾追加。`.ppt` 老格式经 WPS 升级后读/追加,原文件不动。
 
 ### pdf 组
 
@@ -160,9 +197,19 @@ office pdf rotate -f 文档.pdf --angle 90        # 原地旋转
 office pdf watermark -f 文档.pdf --text '机密' --opacity 0.15
 office pdf images -f 文档.pdf --out-dir imgs/
 office pdf to-image -f 文档.pdf --dpi 200 --pages 1
+office pdf footer -f 文档.pdf --text '第 {n} 页 / 共 {N} 页'   # {n}{N} 占位
+office pdf footer -f 文档.pdf --text '机密' --pages 2-4 --top      # 指定页/顶部
+office pdf search -f 文档.pdf --text '季度'                       # 命中的页与上下文
+office pdf from-images -f 扫描件.pdf --images a.jpg b.png --dpi 150
 ```
 
 加密文件先 `decrypt` 后才能 read/merge/split/rotate/watermark。
+
+### html → pdf
+
+```bash
+office convert -f 页面.html --to pdf --out 页面.pdf   # Chrome 渲染(同 md to-pdf 引擎)
+```
 
 ### md 组(排版渲染)
 
