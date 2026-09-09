@@ -154,6 +154,7 @@ office md to-html -f README.md --out README.html
 | 从 \ 到 | 说明 |
 |---|---|
 | xlsx/csv/json ↔ xlsx/csv/json | 纯 Python,自动识别编码(utf-8-sig/utf-8/gb18030)与分隔符 |
+| xlsx/csv/json → md/txt | 导出 Markdown 表格 / TSV 纯文本(支持 --sheet/--range/--cached) |
 | .xls → xlsx/csv/json 等 | WPS 升级后转换(WPS Office 需已安装) |
 | docx/doc → docx、docx/doc → pdf | WPS 引擎保真排版(Word 级质量) |
 | docx → md | 结构近似转换:标题/表格/代码/粗斜体 |
@@ -162,6 +163,8 @@ office md to-html -f README.md --out README.html
 
 ```bash
 office convert -f 表.xlsx --out 表.csv                  # xlsx→csv(带表头)
+office convert -f 表.xlsx --out 表.md                   # 导出 Markdown 表格(首行作表头)
+office convert -f 表.xlsx --out 表.txt                  # 导出 TSV 文本(制表符分隔,可无损读回)
 office convert -f 表.xlsx --to json --out 表.json       # 显式指定目标类型
 office convert -f 说明.md --to pdf --out 说明.pdf
 office convert -f 旧报告.doc --to pdf --out 旧报告.pdf  # 走 WPS

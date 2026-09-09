@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import shutil
@@ -303,7 +305,37 @@ def main() -> int:
     o_csv2 = wpath("out2.json")
     expect_ok("convert csv->json", "convert", "-f", os.path.join(SAMPLES, "utf8.csv"),
               "--out", o_csv2)
-    expect_err("convert 不支持方向", "unsupported_format", "convert", "-f", demo,
+
+    # ---------- convert -> md / txt ----------
+    msrc = wpath("md_src.xlsx")
+    expect_ok("建 md/txt 源表", "write", "--create", "-f", msrc,
+              "--data", json.dumps([["品名", "价格", "备注"],
+                                     ["苹果|梨", 3.5, "好\n吃"],
+                                     ["", True, ""]]))
+    md_path = wpath("md_out.md")
+    expect_ok("convert xlsx->md", "convert", "-f", msrc, "--out", md_path)
+    with open(md_path, encoding="utf-8") as fh:
+        md_text = fh.read()
+    lines = md_text.splitlines()
+    check("md 表头+分隔行", len(lines) >= 3
+          and lines[0] == "| 品名 | 价格 | 备注 |"
+          and lines[1] == "| --- | --- | --- |", md_text)
+    check("md 转义 | 与换行", "苹果\\|梨" in md_text and "好<br>吃" in md_text
+          and "| TRUE |" in md_text, md_text)
+
+    txt_path = wpath("md_out.txt")
+    expect_ok("convert xlsx->txt", "convert", "-f", msrc, "--out", txt_path)
+    with open(txt_path, encoding="utf-8") as fh:
+        txt_rows = list(csv.reader(io.StringIO(fh.read()), delimiter="\t"))
+    check("txt TSV 无损回读", txt_rows == [["品名", "价格", "备注"],
+                                          ["苹果|梨", "3.5", "好\n吃"],
+                                          ["", "TRUE", ""]],
+          repr(txt_rows))
+
+    expect_ok("convert csv->md", "convert", "-f", os.path.join(SAMPLES, "utf8.csv"),
+              "--out", wpath("utf8.md"))
+    expect_ok("convert json->txt", "convert", "-f", o_json, "--out", wpath("out3.txt"))
+    expect_err("convert xlsx->xls 仍不支持", "unsupported_format", "convert", "-f", demo,
                "--out", wpath("a.xls"))
     expect_err("convert 同路径", "same_file", "convert", "-f", demo, "--out", demo)
 

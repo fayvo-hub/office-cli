@@ -13,11 +13,13 @@
   office convert -f a.md --out a.pdf              # 默认样式(精细控制用 office md to-pdf)
   office convert -f a.md --out a.docx
   office convert -f a.docx --out a.md
+  office convert -f a.xlsx --out a.md       # Markdown 表格(首行作表头)
+  office convert -f a.xlsx --out a.txt      # 制表符分隔纯文本(TSV)
 
 支持方向矩阵:
-  xlsx/xlsm/xls -> csv / json / xlsx        (xls 自动升级;--sheet/--range/--cached)
-  csv -> xlsx / json                        (自动识别编码 UTF-8/GBK、分隔符;可 --delimiter)
-  json -> xlsx
+  xlsx/xlsm/xls -> csv / json / xlsx / md / txt   (xls 自动升级;--sheet/--range/--cached)
+  csv -> xlsx / json / md / txt             (自动识别编码 UTF-8/GBK、分隔符;可 --delimiter)
+  json -> xlsx / md / txt
   doc/docx -> pdf / doc/docx -> docx->md     (doc 自动升级)
   docx -> md
   pdf -> docx
@@ -68,7 +70,7 @@ def register(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--no-infer", action="store_true",
                     help="(csv 源)不做数字/布尔推断,全部按文本写入")
     sp.add_argument("--delimiter", metavar="CHAR", default=None,
-                    help="(csv 源)强制分隔符(默认自动识别 , ; \\t |)")
+                    help="(csv 源)强制分隔符(默认自动识别 , ; \\t |);(txt 输出)字段分隔符,默认制表符")
     sp.add_argument("--encoding", metavar="ENC", default=None,
                     help="(csv 源)指定编码,如 gbk;默认自动尝试 UTF-8/GBK")
     sp.add_argument("--css", metavar="PATH", default=None,
@@ -116,22 +118,24 @@ def run(args: argparse.Namespace) -> dict:
         return _run_xlsx_conv(args, args.file, dst_ext)
 
     if src_ext == "csv":
-        if dst_ext not in ("xlsx", "json"):
+        if dst_ext not in ("xlsx", "json", "md", "txt"):
             raise _unsupported(src_ext, dst_ext)
         rows = _read_csv(args.file, delimiter=args.delimiter, encoding=args.encoding)
         if dst_ext == "xlsx":
             _write_xlsx_rows(args.out, rows, args.sheet, infer=not args.no_infer)
         else:
-            doc = {"file": args.file, "rows": rows}
-            _write_text(args.out, json.dumps(doc, ensure_ascii=False, indent=2))
+            _write_text_table(args.out, dst_ext, rows, meta={"file": args.file})
         return _ok(args, rows, warnings)
 
     if src_ext == "json":
-        if dst_ext != "xlsx":
+        if dst_ext not in ("xlsx", "md", "txt"):
             raise _unsupported(src_ext, dst_ext)
         rows, w = _load_json_rows(args.file)
         warnings += w
-        _write_xlsx_rows(args.out, rows, args.sheet, infer=False)
+        if dst_ext == "xlsx":
+            _write_xlsx_rows(args.out, rows, args.sheet, infer=False)
+        else:
+            _write_text_table(args.out, dst_ext, rows, meta={"file": args.file})
         return _ok(args, rows, warnings)
 
     # ---------------- Word 文档类 ----------------
@@ -192,9 +196,9 @@ def run(args: argparse.Namespace) -> dict:
 # ---------------------------------------------------------------------------
 
 def _run_xlsx_conv(args: argparse.Namespace, src_xlsx: str, dst_ext: str) -> dict:
-    """xlsx(或已升级的临时 xlsx)-> csv/json/xlsx 原 excel convert 语义。"""
+    """xlsx(或已升级的临时 xlsx)-> csv/json/md/txt/xlsx。"""
     warnings: list[str] = []
-    if dst_ext not in ("csv", "json", "xlsx"):
+    if dst_ext not in ("csv", "json", "xlsx", "md", "txt"):
         raise _unsupported("xlsx", dst_ext)
     if dst_ext == "xlsx":
         # xlsm -> xlsx / xlsx -> xlsx(规范化另存)
@@ -210,20 +214,29 @@ def _run_xlsx_conv(args: argparse.Namespace, src_xlsx: str, dst_ext: str) -> dic
     inner = argparse.Namespace(file=src_xlsx, sheet=args.sheet, out=args.out,
                                cached=args.cached, range=args.range,
                                to=dst_ext, no_infer=args.no_infer)
-    # 兼容原实现:直接调用其内部逻辑
-    if dst_ext == "csv":
-        rows, extra, w = _read_xlsx_rows(inner)
-        _write_csv(args.out, rows)
-    elif dst_ext == "json":
-        rows, extra, w = _read_xlsx_rows(inner)
-        doc = {"file": args.file, "sheet": extra["sheet"],
-               "range": extra["range"], "rows": rows,
-               "merged_cells": extra["merged"]}
-        _write_text(args.out, json.dumps(doc, ensure_ascii=False, indent=2))
-    else:  # pragma: no cover
-        raise _unsupported("xlsx", dst_ext)
+    rows, extra, w = _read_xlsx_rows(inner)
+    if dst_ext == "json":
+        _write_text_table(args.out, dst_ext, rows, meta={
+            "file": args.file, "sheet": extra["sheet"],
+            "range": extra["range"], "merged_cells": extra["merged"]})
+    else:
+        _write_text_table(args.out, dst_ext, rows, meta=None)
     warnings += w
     return _ok(args, rows, warnings)
+
+
+def _write_text_table(path: str, dst_ext: str, rows: list[list], *, meta) -> None:
+    """csv/md/txt/json(meta) 落盘;xlsx 输出请直接调 _write_xlsx_rows。"""
+    if dst_ext == "csv":
+        _write_csv(path, rows)
+    elif dst_ext == "md":
+        _write_md(path, rows)
+    elif dst_ext == "txt":
+        _write_txt(path, rows)
+    else:
+        doc = dict(meta or {})
+        doc["rows"] = rows
+        _write_text(path, json.dumps(doc, ensure_ascii=False, indent=2))
 
 
 def _ok(args, rows: list[list], warnings: list[str]) -> dict:
@@ -236,7 +249,7 @@ def _unsupported(src_ext: str, dst_ext: str) -> CliError:
     return CliError(
         "unsupported_format",
         f"不支持 {src_ext} -> {dst_ext} 转换。支持方向见 office convert --help:"
-        f"xlsx/csv/json 互转、xls/xlsx、doc/docx/pdf、docx/md、pdf/docx、md/pdf|docx|html")
+        f"xlsx/csv/json 互转并导出 md/txt、xls/xlsx、doc/docx/pdf、docx/md、pdf/docx、md/pdf|docx|html")
 
 
 def _read_xlsx_rows(args) -> tuple[list[list], dict, list[str]]:
@@ -273,13 +286,38 @@ def _read_xlsx_rows(args) -> tuple[list[list], dict, list[str]]:
 
 
 def _write_csv(path: str, rows: list[list]) -> None:
+    _write_dsv(path, rows, ",")
+
+
+def _write_txt(path: str, rows: list[list]) -> None:
+    """二维表 -> TSV 纯文本(标准引号规则,信息无损可读回)。"""
+    _write_dsv(path, rows, "\t")
+
+
+def _write_dsv(path: str, rows: list[list], delim: str) -> None:
     try:
-        with open(path, "w", encoding="utf-8-sig", newline="") as fh:
-            writer = csv.writer(fh, lineterminator="\n")
+        with open(path, "w", encoding="utf-8-sig" if delim == "," else "utf-8",
+                  newline="") as fh:
+            writer = csv.writer(fh, delimiter=delim, lineterminator="\n")
             for row in rows:
                 writer.writerow(["" if v is None else _csv_scalar(v) for v in row])
     except OSError as e:
         raise CliError("write_failed", f"写入 {path} 失败: {e}") from e
+
+
+def _write_md(path: str, rows: list[list]) -> None:
+    """二维表 -> Markdown 管道表格(首行作表头);| 转义为 \\|,换行转 <br>。"""
+    ncol = max((len(r) for r in rows), default=0)
+    lines: list[str] = []
+    for i, r in enumerate(rows):
+        cells = list(r) + [None] * (ncol - len(r))
+        cells = ["" if v is None else _csv_scalar(v) for v in cells[:ncol]]
+        cells = [c.replace("|", "\\|").replace("\r", "").replace("\n", "<br>")
+                 for c in cells]
+        lines.append("| " + " | ".join(cells) + " |")
+        if i == 0:
+            lines.append("| " + " | ".join(["---"] * ncol) + " |")
+    _write_text(path, "\n".join(lines) + ("\n" if lines else ""))
 
 
 def _csv_scalar(v) -> str:

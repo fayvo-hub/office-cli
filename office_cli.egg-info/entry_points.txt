@@ -1,0 +1,2 @@
+[console_scripts]
+office = office.cli:main

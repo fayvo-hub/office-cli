@@ -69,6 +69,8 @@ office convert -f 说明.md --to pdf --out 说明.pdf # 等价
 office convert -f 表.xlsx --out 表.csv            # xlsx→csv(带表头+BOM)
 office convert -f 表.csv --out 表.xlsx            # csv→xlsx
 office convert -f 表.xlsx --to json --out 表.json # json 互转同理; xlsx→csv 支持 --sheet/--range
+office convert -f 表.xlsx --out 表.md            # 导出 Markdown 表格(供直接贴进文档/问答)
+office convert -f 表.xlsx --out 表.txt           # 导出 TSV 制表符文本(信息无损)
 office convert -f 旧.xls --out 新.xlsx            # 老格式升级(WPS)
 office convert -f 报告.docx --out 报告.pdf        # Word→PDF 走 WPS 保真排版
 office convert -f 文档.pdf --to docx --out 文档.docx   # pdf2docx 版面还原
