@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as _dt
 import io
 import json
 import os
@@ -93,6 +94,149 @@ def copy_sample(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+
+def formula_checks() -> None:
+    """RAG 公式求值器单测(内存环境直测,不经 CLI)。"""
+    import datetime as dt2
+
+    from office.cmds_rag.formulas import FormulaError, evaluate
+
+    class Mem:
+        TABLES = {}
+        stack = []
+
+        def __init__(self):
+            self.sales = {
+                (1, 1): "苹果", (2, 1): "香蕉", (3, 1): "苹果",
+                (4, 1): "梨", (5, 1): "橙子",
+                (1, 2): 100, (2, 2): 150, (3, 2): 200, (4, 2): 80, (5, 2): 60,
+                (1, 3): 10.0, (2, 3): 5.5, (3, 3): 12.0, (4, 3): 8.0, (5, 3): 20.0,
+                (1, 4): "=B1*C1", (2, 4): "=B2*C2", (3, 4): "=B3*C3",
+                (4, 4): "=B4*C4", (5, 4): "=B5*C5",
+                (1, 5): "", (2, 5): "好", (3, 5): "", (4, 5): "", (5, 5): "差",
+                (7, 1): "苹果", (7, 2): 300, (7, 3): 9.0, (7, 4): "=B7*C7",
+                (9, 1): "=B9", (9, 2): "=A9",
+            }
+            self.TABLES = {
+                "销售": self.sales,
+                "汇总": {(1, 1): "标题", (1, 2): 1, (2, 1): 2, (2, 2): 3},
+                "人 员表": {(1, 1): "姓名", (1, 2): "城市", (2, 1): "张三",
+                            (2, 2): "北京", (3, 1): 5, (3, 2): "上海"},
+            }
+            self.stack = []
+
+        def cell(self, sheet, row, col):
+            t = self.TABLES.get(sheet or "销售")
+            if t is None:
+                raise FormulaError(f"引用的工作表不存在: {sheet}")
+            v = t.get((row, col))
+            if isinstance(v, str) and v.startswith("="):
+                if (sheet, row, col) in self.stack:
+                    raise FormulaError("循环引用")
+                self.stack.append((sheet, row, col))
+                try:
+                    v = evaluate(self, sheet, row, col, v)
+                finally:
+                    self.stack.pop()
+            return v
+
+        def sheet_max_row(self, sheet):
+            t = self.TABLES.get(sheet or "销售")
+            return max((r for (r, c) in t), default=0) if t else 1048576
+
+        def sheet_exists(self, sheet):
+            return (sheet or "销售") in self.TABLES
+
+    env = Mem()
+
+    def ev(f):
+        return evaluate(env, "销售", 1, 1, f)
+
+    def evr(f):
+        try:
+            ev(f)
+            return False
+        except FormulaError:
+            return True
+
+    def ck(name, cond, detail=""):
+        check(f"formula {name}", cond, detail)
+
+    ck("加法", ev("=1+2") == 3)
+    ck("括号", ev("=(1+2)*3") == 9)
+    ck("幂", ev("=2^10") == 1024)
+    ck("负号", ev("=-5+2") == -3)
+    ck("百分比", ev("=50%") == 0.5)
+    ck("文本拼接", ev('="a"&"b"') == "ab")
+    ck("除法", ev("=10/4") == 2.5)
+    ck("除零", evr("=1/0"))
+    ck("单格取值", ev("=B1") == 100)
+    ck("算术引用", ev("=B1*C1") == 1000.0)
+    ck("负引用", ev("=-B2") == -150)
+    ck("引用拼接", ev('=E2&"-"&B2') == "好-150")
+    ck("引用比较", ev('=IF(A1="苹果","是","否")') == "是")
+    ck("引用嵌套求和", ev("=SUM(B1:C1)+SUM(B3:C3)") == 322.0)
+    ck("百分比引用", ev("=C1%") == 0.1)
+    ck("幂引用", ev("=B1^2") == 10000.0)
+    ck("顶层裸引用", ev("=B2") == 150)
+    ck("空引用算术", ev("=E1+1") == 1)
+    ck("&空引用", ev('=A1&E1&"!"') == "苹果!")
+    ck("LEFT引用", ev("=LEFT(A1,1)") == "苹")
+    ck("RIGHT引用", ev("=RIGHT(A1,1)") == "果")
+    ck("MID引用", ev("=MID(A1,2,1)") == "果")
+    ck("连接截取", ev("=LEFT(A1,1)&RIGHT(A1,1)&MID(A1,2,1)") == "苹果果")
+    ck("LEN", ev("=LEN(A1&B2)") == 5)
+    ck("SUBSTITUTE", ev('=SUBSTITUTE(A1,"苹果","橙子")') == "橙子")
+    ck("TRIM", ev('=TRIM("  a  b ")') == "a b")
+    ck("UPPER", ev('=UPPER("ab")') == "AB")
+    ck("TODAY类型", isinstance(ev("=TODAY()"), dt2.date))
+    ck("NOW类型", isinstance(ev("=NOW()"), dt2.datetime))
+    ck("DATE构造", ev("=DATE(2024,3,15)") == _dt.date(2024, 3, 15))
+    ck("DATE引用参数", ev("=DATE(2024,C1,15)") == _dt.date(2024, 10, 15))
+    ck("DATE非法", evr("=DATE(2024,13,1)"))
+    ck("裸表名取值", ev("=汇总!A1") == "标题")
+    ck("裸表名算术", ev("=汇总!B2*2") == 6)
+    ck("跨表单格SUM忽略文本", ev("=SUM(汇总!A1)") == 0)
+    ck("SUMIF整列跨表", ev("=SUMIF(汇总!B1:B2,1)") == 1)
+    ck("跨表区域SUM", ev("=SUM(汇总!B1:B2)") == 4.0)
+    ck("引号表名取值", ev("='人 员表'!B2") == "北京")
+    ck("引号表名算术", ev("='人 员表'!A3+1") == 6)
+    ck("引号表名SUM区域", ev("=SUM('人 员表'!A2:A3)") == 5.0)
+    ck("引号文本字面量", ev("=A1='苹果'") is True)
+    ck("sq无感叹号当文本", ev('="前缀"&\'abc\'') == "前缀abc")
+    ck("SUM区域", ev("=SUM(B1:B5)") == 590.0)
+    ck("SUM多区", ev("=SUM(B1:B2,C1:C2)") == 265.5)
+    ck("AVERAGE", ev("=AVERAGE(B1:B5)") == 118.0)
+    ck("COUNT", ev("=COUNT(B1:B5)") == 5)
+    ck("COUNTBLANK", ev("=COUNTBLANK(E1:E5)") == 3)
+    ck("COUNTA", ev("=COUNTA(E1:E5)") == 2)
+    ck("MAX/MIN", ev("=MAX(B1:B5)") == 200 and ev("=MIN(B1:B5)") == 60)
+    ck("MAX空区0", ev("=MAX(A20:A21)") == 0)
+    ck("SUM空文本忽略", ev("=SUM(A1:A5)") == 0)
+    ck("SUMIF文本相等", ev('=SUMIF(A1:A5,"苹果",B1:B5)') == 300)
+    ck("SUMIF通配", ev('=SUMIF(A1:A5,"苹*",B1:B5)') == 300)
+    ck("SUMIF数值", ev("=SUMIF(B1:B5,200)") == 200)
+    ck("SUMIF比较", ev('=SUMIF(B1:B5,">=150",C1:C5)') == 17.5)
+    ck("SUMIF单格扩展", ev('=SUMIF(A1:A5,"苹果",B1)') == 300)
+    ck("SUMIF无sum_range", ev('=SUMIF(B1:B5,">100")') == 350)
+    ck("SUMIFS多条件", ev('=SUMIFS(B1:B5,A1:A5,"苹果",C1:C5,">9")') == 300)
+    ck("COUNTIF", ev('=COUNTIF(A1:A5,"苹果")') == 2)
+    ck("COUNTIFS", ev('=COUNTIFS(A1:A5,"苹果",C1:C5,">9")') == 2)
+    ck("SUMIF文本匹配区", ev('=SUMIF(A1:A5,"苹果")') == 0)
+    ck("IF空引用条件", ev('=IF(E1,"有","无")') == "无")
+    ck("AND/OR/NOT", ev("=AND(B1>50,B2>50)") is True
+       and ev("=NOT(1>2)") is True)
+    ck("空区AVERAGE", evr("=AVERAGE(A20:A21)"))
+    ck("未知函数", evr("=VLOOKUP(1,2,3)"))
+    ck("不存在表", evr("='不存在'!A1+1"))
+    ck("裸区域运算", evr("=B1:B3+1"))
+    ck("多格参数", evr("=LEFT(A1:B2,1)"))
+    ck("未闭合括号", evr("=SUM(A1:B2"))
+    ck("循环引用", evr("=A9"))
+    ck("文本算术", evr('="abc"+1'))
+    ck("TRUE/FALSE", ev("=TRUE") is True and ev("=FALSE") is False)
+    ck("ROUND", ev("=ROUND(B1/3,2)") == 33.33)
+
 
 def main() -> int:
     global _passed, _failed
@@ -874,6 +1018,9 @@ def main() -> int:
                "-f", copy_sample("sample.md"))
     expect_err("rag prep 目录无文档", "no_file", "rag", "prep", "-f",
                wpath("rag_dir"))
+
+    # ---------- rag 公式求值器(内存直测) ----------
+    formula_checks()
 
     # ---------- 汇总 ----------
     print()
