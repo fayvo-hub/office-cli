@@ -14,7 +14,6 @@ git status --short          # 工作区干净(排除已忽略的 build/dist/.smo
 python tests/run_tests.py   # 全量黑盒测试,期望 NNN passed / 0 failed(当前 277)
 ```
 
-- 若改了 skills/office-ops/SKILL.md(仓库版,技能源),先 `cp skills/office-ops/SKILL.md "C:/Users/Administrator/.pi/agent/skills/office-ops/SKILL.md"` 同步全局再发布。
 - 本机 WPS KWPP(演示 COM)已损坏:`legacy.ppt` 相关测试被 guard 跳过属正常;`ppt to-pdf` 需 WPS,若不可用测试会自行跳过,勿当失败。
 
 ## 1. bump 版本(两处必须同步,否则 exe 报旧版本)

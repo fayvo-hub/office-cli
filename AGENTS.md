@@ -34,8 +34,7 @@ skills/office-ops/       # office-ops 技能的仓库源(全局副本在 ~/.pi/a
 
 1. **文档必须与实现逐参数一致**。曾整轮凭记忆把 cond-format/layout/comment/validate/insert/delete/replace/footer/search/from-images 的参数写进 README/SKILL.md,冒烟时发现与真实 argparse 完全不符,只能逐文件对照源码重写。
 2. 写文档前**先读命令模块源码的 `DESCRIPTION` docstring 与 `register()`**,那里有权威用法示例;禁止凭印象推断 `--xxx` 的存在与语义。
-3. SKILL.md(仓库版)改后必须 `cp` 同步到全局 `C:/Users/Administrator/.pi/agent/skills/office-ops/SKILL.md`,否则 PI 加载的是旧版。
-4. README/SKILL 与实现冲突时以实现为准,立即修文档,不要迁就文档。
+3. README/SKILL 与实现冲突时以实现为准,立即修文档,不要迁就文档。
 
 ## 版本与发布
 
