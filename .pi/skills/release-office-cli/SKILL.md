@@ -5,7 +5,7 @@ description: 发布 office-cli 新版本(重打包单文件 exe + 发 GitHub Rel
 
 # office-cli 发布流程
 
-在仓库根 `C:/Users/Administrator/AppData/Roaming/pi-desktop/chat-workspace/office-cli` 执行(或任意 office-cli clone 的根)。全程用 Git Bash。仓库有两个远程:`github`(https://github.com/fayvo-hub/office-cli.git,发布目标,master 分支)与 `origin`(阿里云 codeup,旧,勿推)。本机直连 GitHub 会被重置,推送统一用 `git -c http.proxy=http://127.0.0.1:7897 push github master`(`-c` 必须放子命令**前**,`git push -c` 会报 unknown switch)。
+在仓库根 `C:/Users/Administrator/AppData/Roaming/pi-desktop/chat-workspace/office-cli` 执行(或任意 office-cli clone 的根)。全程用 Git Bash。仓库单远程 `origin` = https://github.com/fayvo-hub/office-cli.git(阿里云 codeup 旧源已删),发布目标分支 master。本机直连 GitHub 会被重置,推送统一用 `git -c http.proxy=http://127.0.0.1:7897 push origin master`(`-c` 必须放子命令**前**,`git push -c` 会报 unknown switch)。
 
 ## 0. 前置检查
 
@@ -23,7 +23,7 @@ python tests/run_tests.py   # 全量黑盒测试,期望 NNN passed / 0 failed(�
 # pyproject.toml 的 version = "x.y.z"
 # office/__init__.py 的 __version__ = "x.y.z"
 git add pyproject.toml office/__init__.py && git commit -m "chore: bump x.y.z"
-git -c http.proxy=http://127.0.0.1:7897 push github master
+git -c http.proxy=http://127.0.0.1:7897 push origin master
 ```
 
 教训:曾只改 pyproject 忘改 `__init__.py`,打包后 `office --version` 仍报旧版,需重打。
@@ -72,7 +72,7 @@ gh release view vX.Y.Z --json isDraft,isPrerelease,assets
 
 - 直连下载常被重置,curl 必须走 `-x http://127.0.0.1:7897`。
 - 发布瞬间资产可能假 404(CDN 延迟)或返回元数据 JSON(需 `Accept: application/octet-stream`),多试一次并用 SHA256 定论。
-- 不要推 origin(codeup);文档提交与发布都只走 github remote。
+- 发布与文档提交都只走 `origin`(GitHub);阿里云 codeup 旧源已删除,仓库不存在其他远程。
 
 ## 6. 收尾
 
@@ -84,7 +84,7 @@ gh release view vX.Y.Z --json isDraft,isPrerelease,assets
 | 现象 | 原因/处理 |
 |---|---|
 | `office --version` 旧版本 | `__init__.py` 没同步,重打前先改 |
-| push 卡住/重置 | 用 `git -c http.proxy=http://127.0.0.1:7897 push github master` 语法 |
+| push 卡住/重置 | 用 `git -c http.proxy=http://127.0.0.1:7897 push origin master` 语法 |
 | exe 里某命令消失(26MB 级小 exe) | 缺 hidden-import;新模块要能被 build_exe 的 glob 收到 |
 | 测试大面积失败 | 先 `python scripts/make_sample.py` 重建 samples(勿用被改脏的) |
 | md to-pdf 在 exe 报 need_dep | 正常限制,exe 不含 playwright,用 pip 完整版 |
