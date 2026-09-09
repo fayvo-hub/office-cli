@@ -1,15 +1,15 @@
 Metadata-Version: 2.4
 Name: office-cli
-Version: 0.2.0
-Summary: 面向 AI 调用的办公文档 CLI:Excel/Word/PDF/Markdown 读写与互转(JSON 输入输出)
+Version: 0.3.0
+Summary: 面向 AI 调用的办公文档 CLI:Excel/Word/PDF/Markdown/PowerPoint 读写与互转(JSON 输入输出)
 Requires-Python: >=3.9
 Requires-Dist: openpyxl>=3.1
 Requires-Dist: python-docx>=1.1
 Requires-Dist: PyMuPDF>=1.24
 Requires-Dist: pdfplumber>=0.11
 Requires-Dist: pypdf>=4.0
-Requires-Dist: xlrd>=2.0
 Requires-Dist: pdf2docx>=0.5
+Requires-Dist: python-pptx>=1.0
 Provides-Extra: images
 Requires-Dist: Pillow>=10.0; extra == "images"
 Provides-Extra: mdpdf

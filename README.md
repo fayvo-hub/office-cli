@@ -88,17 +88,18 @@ office excel merge         # 合并/取消合并单元格
 office excel chart         # bar/col/line/pie 图表
 office excel image         # 插入/删除图片
 office excel pivot         # list/set-source 透视表
-office excel layout        # 布局: 行列尺寸/显隐/冻结窗格/打印区域
-office excel cond-format   # 条件格式(色阶/数据条/图标/规则)
-office excel comment       # 批注增改删
-office excel validate      # 数据验证(下拉)增/查/清
+office excel layout        # 版式: 列宽/行高/冻结窗格/自动筛选/隐藏行列
+office excel cond-format   # 条件格式 add/clear(比较/区间/包含/重复值高亮)
+office excel comment       # 批注 set/clear
+office excel validate      # 数据验证(下拉) add/clear
 office excel insert        # 插入行列(合并区/表/筛选自动检查)
-office excel delete        # 删除行列(内容/整行/整列)
-office excel replace       # 查找替换(值/公式/批注)
+office excel delete        # 删除整行/整列
+
+office excel replace       # 查找替换(--regex/--in-formulas 可选)
 office convert             # 跨格式互转, 见下表
 office word read           # 段落/表格/图片元数据(可导出图片)
 office word write          # 新建/追加段落、标题、表格、代码块、图片、分页
-office word replace        # 查找替换(正文/表格/页眉, 跨 run 合并)
+office word replace        # 替换/模板占位符填充(正文/表格/页眉, 跨 run 合并)
 office ppt read            # 页/标题/文本层级/表格/图片/备注(可导出图片)
 office ppt write           # 新建/追加幻灯片(标题/要点/表格/图片/备注)
 office ppt to-pdf          # PPT → PDF(WPS 引擎)
@@ -132,14 +133,26 @@ office excel write -f 新表.xlsx --data '[["a","b"]]' --create        # 新建
 office excel sheet copy -f 表.xlsx --name 成绩 --new-name 成绩备份   # 复制 sheet
 office excel style -f 表.xlsx --range A1:E1 --bold --fill '#FFF2CC' --align center
 office excel merge -f 表.xlsx --range A1:C1 --center
-office excel layout -f 表.xlsx --range A:B --col-width 20     # 列宽英寸
-office excel layout -f 表.xlsx --range 1:1 --row-height 30    # 行高磅
-office excel cond-format -f 表.xlsx --range C2:C20 --type color-scale
-office excel comment add -f 表.xlsx --cell B2 --text '备注'
-office excel validate add -f 表.xlsx --range D2:D20 --list '甲,乙,丙'
-office excel insert -f 表.xlsx --axis rows --at 3 --count 2
-office excel delete -f 表.xlsx --axis rows --at 3 --count 2   # 连行列内容
-office excel replace -f 表.xlsx --find 旧值 --replace 新值    # 值/公式/批注
+office excel layout -f 表.xlsx --col-width 'A=18,C:E=22'     # 列宽(字符数); 行高同理 --row-height '1=28,3:5=20'
+office excel layout -f 表.xlsx --freeze B2                  # 冻结窗格(A2=冻首行, B1=冻A列); --unfreeze 取消
+
+office excel layout -f 表.xlsx --filter A1:F100             # 表头自动筛选; --hide-cols 'C:F'/--show-rows 等显隐
+
+office excel cond-format add -f 表.xlsx --range C2:C20 --op between --value '50,100'  # --op: gt/lt/gte/lte/eq/neq/between/not-between/contains/duplicates
+
+office excel cond-format add -f 表.xlsx --range D2:D20 --op duplicates   # 重复值高亮; clear 用 --range 或 --all
+
+office excel comment set -f 表.xlsx --cell B2 --text '备注' --author 张三   # set 新建/覆盖; clear 删除
+
+office excel validate add -f 表.xlsx --range D2:D20 --list '甲,乙,丙'      # 选项含逗号用 --source '选项表!A1:A5'
+
+office excel validate clear -f 表.xlsx --range D2:D20        # 移除与区域相交的下拉验证
+
+office excel insert -f 表.xlsx --rows 3 --count 2            # 第 3 行前插 2 行; --cols C 插列
+
+office excel delete -f 表.xlsx --rows 3-5                    # 删第 3~5 行; --cols B:D 删列
+
+office excel replace -f 表.xlsx --find 旧值 --replace 新值   # 可加 --regex/--match-case/--in-formulas/--range
 office excel chart add -f 表.xlsx --type bar --data A1:B6 --at F2 --title 季度
 office excel image add -f 表.xlsx --image logo.png --at D2 --scale 0.5
 office excel pivot set-source -f 表.xlsx --name 数据透视表1 --ref A1:F100
@@ -171,7 +184,7 @@ office word write -f 报告.docx --data-file blocks.json   # 追加
 ```
 
 `word read` 输出段落(`text/style/level`)、表格(带表头样式名)、图片元数据;`--save-images DIR` 导出正文图片。
-`word replace` 用 `--find/--replace`(JSON 文件传字符串数组做多对),支持加粗/斜体等 run 级精确替换;跨 run 文本会自动合并段落重排;命中表格与页眉页脚;`.doc` 同样先升级再操作。
+`word replace` 两种用法: `--find 旧词 --replace 新词`(单对)或 `--data-file repl.json` 批量模板替换(JSON 对象 `{"{{金额}}": "12800 元"}`,值 null=删空);加 `--ignore-case` 忽略大小写。命中正文/表格/页眉页脚,优先 run 级精确替换保留样式,跨 run 文本自动合并重建(样式取首 run);`summary` 返回替换数/重建段数。
 `.doc` 文件会先经 WPS 升级为 `.docx` 再读/写,原文件不动。
 
 ### ppt 组
@@ -197,10 +210,13 @@ office pdf rotate -f 文档.pdf --angle 90        # 原地旋转
 office pdf watermark -f 文档.pdf --text '机密' --opacity 0.15
 office pdf images -f 文档.pdf --out-dir imgs/
 office pdf to-image -f 文档.pdf --dpi 200 --pages 1
-office pdf footer -f 文档.pdf --text '第 {n} 页 / 共 {N} 页'   # {n}{N} 占位
-office pdf footer -f 文档.pdf --text '机密' --pages 2-4 --top      # 指定页/顶部
-office pdf search -f 文档.pdf --text '季度'                       # 命中的页与上下文
-office pdf from-images -f 扫描件.pdf --images a.jpg b.png --dpi 150
+office pdf footer -f 文档.pdf --text '第 {page} 页 / 共 {pages} 页'   # 原地加页脚; {page}{pages} 占位
+
+office pdf footer -f 文档.pdf --text '机密' --pages 2-4 --color 990000   # 指定页/字号 --size/下边距 --margin
+
+office pdf search -f 文档.pdf --find '季度'                       # 命中页码+上下文片段(无命中 total=0)
+
+office pdf from-images -f 扫描件.pdf --out 扫描.pdf a.jpg b.png   # 图片为位置参数, 每张一页适配 A4
 ```
 
 加密文件先 `decrypt` 后才能 read/merge/split/rotate/watermark。
