@@ -18,17 +18,42 @@ office pdf to-image -f c.pdf --out-dir 页图/ --dpi 150
 
 ## 安装
 
-系统 Python 3.11+:
+公开仓库: https://github.com/fayvo-hub/office-cli
+
+**需要 Python 3.9+;git 不是必需**(pip 支持直接装 GitHub zip)。安装后命令行
+可用 `office`,也可以用 `python -m office`。
+
+### 一键安装(用户)
 
 ```bash
-pip install -e .            # excel 必需
-pip install -e ".[pdf,mdpdf,wps,images]"   # 全功能(PyMuPDF/pdfplumber/pypdf/
-                                      # pdf2docx/markdown/pygments/playwright/pywin32/Pillow)
+# 有 git(升级方便,同样命令可重复执行)
+python -m pip install --upgrade "office-cli[mdpdf,wps,images] @ git+https://github.com/fayvo-hub/office-cli.git"
+# 无 git: pip 直装 GitHub zip
+python -m pip install --upgrade "office-cli[mdpdf,wps,images] @ https://github.com/fayvo-hub/office-cli/archive/refs/heads/master.zip"
+# 免安装兑底: 下载解压后用 python -m office 调用(等价,前缀长一些)
 ```
 
-- **md to-pdf** 需要本机 Chrome 或 Edge(用系统浏览器渲染)。
-- **.xls / .doc 老格式** 需要本机安装 **WPS Office**(自动升级为 .xlsx/.docx 后操作,原文件不动)。
-- 命令行可用 `office`,也可以用 `python -m office`。
+### 免 Python:单文件版 office.exe
+
+GitHub Releases 提供免安装单文件版(约 120MB):下载 `office.exe` 后直接运行。
+受限项:md→pdf 需 playwright 库(单文件版不含,调用时会提示装完整版);
+.xls/.doc 老格式升级与 docx→pdf 排版导出仍依赖本机 **WPS Office**。
+
+### 开发安装(本仓库)
+
+```bash
+pip install -e ".[mdpdf,wps,images]"   # mdpdf=md 渲染;wps=WPS COM;images=图片
+python scripts/build_exe.py             # 重新打包单文件 exe(需要 pip install pyinstaller)
+```
+
+核心依赖(openpyxl/python-docx/PyMuPDF/pdfplumber/pypdf/pdf2docx 含其依赖)
+随包自动安装,Excel/Word/PDF 全套开箱即用。
+
+### 环境需求
+
+- **md to-pdf** 需要本机 Chrome 或 Edge(用系统浏览器渲染)+ playwright 库;
+- **.xls / .doc 老格式**与 docx→pdf 需要本机 **WPS Office**(自动升级为 .xlsx/.docx 后操作,原文件不动);
+- 不确定环境先跑 `office info`(自检依赖/引擎/运行模式 pip|exe)。
 
 ## 通用协议
 

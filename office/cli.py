@@ -97,6 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # PyInstaller 单文件模式:office.exe 被主进程以 "-m office.wps_worker" 参数
+    # 再次拉起时,充当 WPS COM 子进程(与 pip 版 subprocess 行为一致)
+    if getattr(sys, "frozen", False) and list(sys.argv[1:3]) == ["-m", "office.wps_worker"]:
+        from . import wps_worker
+
+        return wps_worker.worker_main(sys.argv[3] if len(sys.argv) > 3 else "{}")
+
     # Windows 控制台可能是 GBK,强制 UTF-8 输出,避免中文/特殊字符编码崩溃
     for stream in (sys.stdout, sys.stderr):
         try:

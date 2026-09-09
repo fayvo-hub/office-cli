@@ -14,3 +14,8 @@ venv/
 *.tmp.csv
 
 # 样例缓存文件(可重新生成)
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec

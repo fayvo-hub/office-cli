@@ -438,21 +438,27 @@ def _write_text(path: str, text: str) -> None:
 
 
 def _silence_stdout():
-    """临时把进程 fd1 指向 devnull(供会 print 到 stdout 的第三方导入使用)。"""
+    """临时把进程 fd1/fd2 指向 devnull。
+
+    供会向控制台 print / 打日志的第三方库使用(pdf2docx 转换时的
+    [INFO] 日志经 logging 默认 handler 写到 stderr;fitz 弃用告警写 stdout)。
+    """
     import contextlib
-    import io
 
     @contextlib.contextmanager
     def _cm():
-        old_fd = os.dup(1)
+        old_out, old_err = os.dup(1), os.dup(2)
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
         try:
             yield
         finally:
-            os.dup2(old_fd, 1)
+            os.dup2(old_out, 1)
+            os.dup2(old_err, 2)
             os.close(devnull)
-            os.close(old_fd)
+            os.close(old_out)
+            os.close(old_err)
     return _cm()
 
 
@@ -466,12 +472,15 @@ def _pdf_to_docx(src: str, dst: str) -> None:
     try:
         with _silence_stdout():  # pdf2docx 导入时 fitz deprecation 会 print 到 stdout
             from pdf2docx import Converter
-    except ImportError:  # pragma: no cover
-        raise CliError("need_dep", "pdf->docx 需要 pdf2docx 库,请安装: pip install pdf2docx") from None
+    except ImportError as e:  # pragma: no cover
+        raise CliError("need_dep",
+                       f"pdf->docx 需要 pdf2docx 库且加载失败: {e}"
+                       f"。请安装: pip install pdf2docx") from None
     conv = None
     try:
-        conv = Converter(src)
-        conv.convert(dst, multi_paragraphs=False)
+        with _silence_stdout():  # pdf2docx 转换过程会向 stdout 打 [INFO] 日志
+            conv = Converter(src)
+            conv.convert(dst, multi_paragraphs=False)
     except Exception as e:
         raise CliError("convert_failed",
                        f"pdf2docx 转换失败: {type(e).__name__}: {e}"

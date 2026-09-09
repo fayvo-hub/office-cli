@@ -113,7 +113,12 @@ _OPS = {
 
 
 def main() -> int:
-    job = json.loads(sys.argv[1])
+    return worker_main(sys.argv[1])
+
+
+def worker_main(payload: dict | str) -> int:
+    """执行一次转换任务(payload 为 dict 或 JSON 字符串),返回进程退出码。"""
+    job = payload if isinstance(payload, dict) else json.loads(payload)
     op = job["op"]
     if op == "probe":
         # 探测:能启动应用即可

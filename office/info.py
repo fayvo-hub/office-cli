@@ -35,9 +35,9 @@ DESCRIPTION = """环境自检:输出本机 Python、各依赖库、转换引擎(
 """
 
 _MODULES = (
-    "openpyxl", "docx", "fitz", "pdfplumber", "pypdf", "xlrd",
+    "openpyxl", "docx", "fitz", "pdfplumber", "pypdf",
     "pdf2docx", "markdown", "pygments", "playwright", "win32com",
-    "PIL", "pandas",
+    "PIL",
 )
 
 _CHROME_PATHS = (
@@ -82,10 +82,12 @@ def run(args: argparse.Namespace) -> dict:
             engines["wps_error"] = str(e)
 
     missing = [k for k, v in modules.items() if not v]
+    mode = "exe" if getattr(sys, "frozen", False) else "pip"
     return {
         "ok": True,
         "tool": "office",
         "version": __version__,
+        "mode": mode,
         "python": f"{sys.executable} {platform.python_version()}",
         "platform": platform.platform(),
         "modules": modules,

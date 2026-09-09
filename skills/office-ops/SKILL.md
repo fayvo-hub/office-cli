@@ -5,8 +5,72 @@ description: 通过 office-cli 命令读写/转换 Excel、Word、PDF、CSV/JSON
 
 # office-ops 技能:办公文档全格式操作(office-cli)
 
-本技能操作 **本机已安装的 office-cli**。先 `office info` 确认环境与可用引擎,再按需调用。
+本技能操作 **本机已安装的 office-cli**。若 `office` 命令不可用,先按下方
+「自动安装」一节装好;然后 `office info` 确认环境与可用引擎,再按需调用。
 命令形态:`office <组> <子命令> -f 文件 [参数]`;成功=stdout JSON + 退出码 0;业务错误=stderr JSON `{"error":{"code","message"}}` + 退出码 3(参数错误=2)。所有输出 UTF-8 JSON,直接解析即可。
+
+## 自动安装(首次使用/office 命令不存在时)
+
+公开仓库: https://github.com/fayvo-hub/office-cli
+安装目标:**生成 `office` 命令**(Python 的 Scripts 目录 / 或解压目录下的 office.exe)。
+原则:有 Python 走 pip(功能最全、升级最方便);无 Python 下载免安装 exe;
+git 不是必需(pip 可直接装 zip)。全部命令幂等,可重复执行。
+
+### 第 1 步:探测现状
+
+```cmd
+office --version   :: 能输出版本 → 已装好,直接跳到最后一步验证
+```
+
+### 第 2 步:找 Python(任一可用即可,需 3.9+)
+
+依次尝试:`py -3.13` / `py -3.12` / `py -3.11` / `py -3.10` / `py -3.9` / `python`,
+取第一个能跑 `--version` 的解释器,记作 PY(后续安装命令都用它)。
+Windows 下 `py` launcher 与 `python` 通常指向同一环境,装完即可共用。
+
+### 第 3 步:安装(按以下顺序,命中即止)
+
+**A. 有 Python + git(升级体验最好)**
+```cmd
+%PY% -m pip install --upgrade "office-cli[mdpdf,wps,images] @ git+https://github.com/fayvo-hub/office-cli.git"
+```
+
+**B. 有 Python、无 git(pip 直装 GitHub zip,推荐主力路径)**
+```cmd
+%PY% -m pip install --upgrade "office-cli[mdpdf,wps,images] @ https://github.com/fayvo-hub/office-cli/archive/refs/heads/master.zip"
+```
+
+**C. 有 Python 但 pip 装不上(网络/构建异常)——免安装兑底**
+```cmd
+:: 下载 zip 解压到固定目录(如 %LOCALAPPDATA%\office-cli),之后用 python -m office 代替 office
+powershell -Command "Invoke-WebRequest -Uri https://github.com/fayvo-hub/office-cli/archive/refs/heads/master.zip -OutFile %TEMP%\office-cli.zip; Expand-Archive %TEMP%\office-cli.zip %LOCALAPPDATA%\office-cli -Force"
+cd /d %LOCALAPPDATA%\office-cli\office-cli-master && python -m office info
+:: 注:python -m office 与 office 命令完全等价,只是前缀长;装好 pip 后可随时补 A/B
+```
+
+**D. 完全没有 Python——下载免安装单文件版(约 120MB,来自 GitHub Release)**
+```cmd
+powershell -Command "Invoke-WebRequest -Uri https://github.com/fayvo-hub/office-cli/releases/latest/download/office.exe -OutFile %LOCALAPPDATA%\office-cli\office.exe"
+:: 之后用完整路径调用,或把 %LOCALAPPDATA%\office-cli 加入 PATH
+%LOCALAPPDATA%\office-cli\office.exe info
+```
+exe 版限制:md→pdf 不可用(缺 playwright,报错会提示装完整版);WPS 老格式升级/排版导出需要本机装 WPS Office。
+
+**E. 连 Python 都没有、也不想用 exe** → 先引导装 Python 再重试:
+```cmd
+winget install -e --id Python.Python.3.13
+:: 或官网 https://www.python.org/downloads/ 下载安装(勾选 Add to PATH)
+```
+
+### 第 4 步:验证(必做)
+
+```cmd
+office info
+```
+读输出 JSON:`ok` 必须为 true;`mode` = pip|exe;`missing` 期望为 `[]`(pip 全量)或
+仅 `["playwright"]`(exe 版,此时不要调用 md to-pdf);`engines.wps` 为 false 时
+.xls/.doc 老格式与 docx→pdf 不可用(需装 WPS Office)。
+**若以上步骤均失败,直接告诉用户安装失败原因与第 E 步/手动安装指引,不要反复重试。**
 
 ## 通用约定
 

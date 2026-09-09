@@ -220,7 +220,9 @@ def render_html_to_pdf(html_path: str, pdf_path: str) -> dict:
         from playwright.sync_api import sync_playwright
     except ImportError:  # pragma: no cover
         raise CliError("need_dep",
-                       "需要 playwright 库: pip install playwright") from None
+                       "缺 playwright 库,无法渲染 PDF。完整版安装见"
+                       " https://github.com/fayvo-hub/office-cli#安装"
+                       "(pip 装 office-cli[mdpdf] 即可)或改用 office md to-docx/html") from None
     mermaid_ok = True
     try:
         with sync_playwright() as p:
