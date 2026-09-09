@@ -22,6 +22,7 @@ from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from ._atomic import replace_with_retry
 from .errors import CliError
 
 _MERMAID_RE = re.compile(r"```mermaid[ \t]*\n(.*?)(?:\n```|```)", re.S)
@@ -609,7 +610,7 @@ def _write_text_atomic(path: str, content: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except Exception:
         try:
             os.remove(tmp)
@@ -624,7 +625,7 @@ def _write_docx_atomic(doc: Document, path: str) -> None:
     os.close(fd)
     try:
         doc.save(tmp)
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except Exception:
         try:
             os.remove(tmp)

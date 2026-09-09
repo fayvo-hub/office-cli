@@ -12,6 +12,7 @@ v2 对常用公式直接求值 —— 求值器覆盖真实台账高频场景:
         ROUND ROUNDUP ROUNDDOWN INT ABS MOD
         LEFT RIGHT MID LEN TRIM UPPER LOWER SUBSTITUTE CONCATENATE
         TODAY NOW TRUE FALSE
+        ISNUMBER ISBLANK ISTEXT ISNONTEXT ISLOGICAL
 
 原则:
 - 能算的算出真值;算不了(未知函数/VLOOKUP/循环引用/外部链接)由调用方保留原文并记录原因
@@ -114,6 +115,7 @@ _LOG_FUNCS = {"AND", "OR", "NOT"}
 _AGG_FUNCS = {"SUM", "AVERAGE", "COUNT", "COUNTA", "COUNTBLANK", "MAX", "MIN",
               "SUMIF", "SUMIFS", "COUNTIF", "COUNTIFS"}
 _DATE_FUNCS = {"TODAY", "NOW", "DATE"}
+_INFO_FUNCS = {"ISNUMBER", "ISBLANK", "ISTEXT", "ISNONTEXT", "ISLOGICAL"}
 
 
 def _is_ref(a):
@@ -480,6 +482,8 @@ class Evaluator:
             return self._text_fn(name, args)
         if name in _LOG_FUNCS:
             return self._log_fn(name, args)
+        if name in _INFO_FUNCS:
+            return self._info_fn(name, args)
         if name == "IF":
             return self._if(args)
         if name in _DATE_FUNCS:
@@ -775,6 +779,26 @@ class Evaluator:
             return not truth(args[0])
         vals = [truth(a) for a in args]
         return all(vals) if name == "AND" else any(vals)
+
+    # ---- 信息类(IS 系) ----
+    def _info_fn(self, name, args):
+        if len(args) != 1:
+            raise FormulaError(f"{name}() 需要 1 个参数")
+        v = self.value_of(args[0])      # 单格引用收敛; 多格区域抛错
+        if name == "ISNUMBER":
+            # bool 是 int 子类必须先排除; Excel 日期即数值序列号 → TRUE
+            if isinstance(v, bool):
+                return False
+            return isinstance(v, (int, float, _dt.date))
+        if name == "ISBLANK":
+            return v is None
+        if name == "ISTEXT":
+            return isinstance(v, str)
+        if name == "ISNONTEXT":
+            return not isinstance(v, str)
+        if name == "ISLOGICAL":
+            return isinstance(v, bool)
+        raise FormulaError(f"不支持的函数 {name}()")
 
     def _if(self, args):
         if len(args) not in (2, 3):

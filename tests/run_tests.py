@@ -95,6 +95,24 @@ def copy_sample(name: str) -> str:
 
 # ---------------------------------------------------------------------------
 
+def display_checks() -> None:
+    """渲染层单测: number_format → 输出形态(真实报表带 [Red] 颜色标记, 曾误判为日期)。"""
+    from office.cmds_rag.prep import _display
+    ck = lambda name, cond: check(f"display {name}", cond, str((cond, _display)))
+    # [Red] 颜色标记里的字母不得命中日期占位符(5900 曾变 1916-02-25)
+    ck("[Red]金额不误判日期", _display(5900, "#,##0;[Red]-#,##0") == 5900)
+    ck("[Red]货币不误判日期",
+       _display(862000, "¥#,##0.00;[Red]-¥#,##0.00") == 862000)
+    # 真日期格式: 裸数值按序列转 ISO; 带时间才出时间
+    ck("日期序列→ISO", _display(45292, "yyyy-mm-dd") == "2024-01-01")
+    ck("日期时间保留", _display(45292.5, "yyyy-mm-dd hh:mm")
+       == "2024-01-01T12:00:00")
+    ck("剥色后仍识别日期", _display(5900, "[Red]yyyy-mm-dd")
+       == "1916-02-25")
+    ck("百分比渲染", _display(0.13, "0.0%") == "13%")
+    ck("文本原样", _display("苹果", "yyyy") == "苹果")
+
+
 def formula_checks() -> None:
     """RAG 公式求值器单测(内存环境直测,不经 CLI)。"""
     import datetime as dt2
@@ -226,6 +244,20 @@ def formula_checks() -> None:
     ck("IF空引用条件", ev('=IF(E1,"有","无")') == "无")
     ck("AND/OR/NOT", ev("=AND(B1>50,B2>50)") is True
        and ev("=NOT(1>2)") is True)
+    ck("ISNUMBER", ev("=ISNUMBER(B1)") is True
+       and ev("=ISNUMBER(A1)") is False
+       and ev("=ISNUMBER(E1)") is False
+       and ev("=ISNUMBER(TRUE)") is False
+       and ev("=ISNUMBER(DATE(2024,1,1))") is True)
+    ck("ISBLANK", ev("=ISBLANK(A6)") is True
+       and ev("=ISBLANK(B1)") is False
+       and ev('=ISBLANK("")') is False)  # Excel: 空串不是 blank
+    ck("ISTEXT/ISNONTEXT", ev("=ISTEXT(A1)") is True
+       and ev("=ISNONTEXT(B1)") is True
+       and ev("=ISNONTEXT(A1)") is False)
+    ck("ISLOGICAL", ev("=ISLOGICAL(1>2)") is True)
+    ck("IF+ISNUMBER 级联", ev('=IF(ISNUMBER(B1),"数值","非数值")') == "数值"
+       and ev('=IF(ISNUMBER(A1),"数值","非数值")') == "非数值")
     ck("空区AVERAGE", evr("=AVERAGE(A20:A21)"))
     ck("未知函数", evr("=VLOOKUP(1,2,3)"))
     ck("不存在表", evr("='不存在'!A1+1"))
@@ -1031,8 +1063,15 @@ def main() -> int:
           and os.path.exists(wpath("rag_dir/qa.json")), str(out))
     expect_err("rag prep 不支持扩展", "unsupported_format", "rag", "prep",
                "-f", copy_sample("sample.md"))
-    expect_err("rag prep 目录无文档", "no_file", "rag", "prep", "-f",
-               wpath("rag_dir"))
+    # rag_dir 里全是 .md/.json 产物 → 目录模式逐文件报 unsupported(不抛错)
+    out = expect_ok("rag prep 目录全不支持逐条失败", "rag", "prep", "-f",
+                    wpath("rag_dir"))
+    check("rag 不支持逐条计 failed", out and out.get("total", 0) >= 3
+          and out.get("failed") == out.get("total")
+          and out.get("succeeded") == 0, str(out))
+    empty_dir = wpath("rag_empty")
+    os.makedirs(empty_dir, exist_ok=True)
+    expect_err("rag prep 空目录", "no_file", "rag", "prep", "-f", empty_dir)
     # csv(标准库直写, 非 office-cli 自产)/txt/docx 链路
     import csv as _csv
     csvp = wpath("rag_src.csv")
@@ -1066,6 +1105,9 @@ def main() -> int:
 
     # ---------- rag 公式求值器(内存直测) ----------
     formula_checks()
+
+    # ---------- rag 渲染层(number_format → 形态) ----------
+    display_checks()
 
     # ---------- 汇总 ----------
     print()

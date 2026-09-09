@@ -15,6 +15,7 @@ from docx.oxml.ns import qn
 from docx.table import Table, _Cell  # noqa: PLC2701 — python-docx 无公开 Cell 名
 from docx.text.paragraph import Paragraph
 
+from ._atomic import replace_with_retry
 from .errors import CliError
 
 _HEADING_RE = re.compile(r"^Heading (\d)$")
@@ -141,7 +142,8 @@ def docx_to_md(docx_path: str, md_path: str) -> dict:
         raise CliError("cannot_open", f"无法打开 {docx_path}: {e}") from e
 
     out: list[str] = []
-    stat = {"paragraphs": 0, "tables": 0, "headings": 0, "list_items": 0,
+    stat = {"paragraphs": 0, "tables": 0, "tables_skipped": 0,
+            "headings": 0, "list_items": 0,
             "images_ignored": 0, "chars": 0}
 
     def add_blank_if_needed() -> None:
@@ -151,9 +153,13 @@ def docx_to_md(docx_path: str, md_path: str) -> dict:
     for block in _iter_blocks(doc):
         if isinstance(block, Table):
             add_blank_if_needed()
-            out.append(_table_md(block))
+            try:
+                out.append(_table_md(block))
+                stat["tables"] += 1
+            except Exception as e:  # noqa: BLE001 脏文档缺 tblGrid 等: 单表降级跳过
+                out.append(f"<!-- 损坏的表格已跳过: {e} -->")
+                stat["tables_skipped"] += 1
             add_blank_if_needed()
-            stat["tables"] += 1
             continue
         p: Paragraph = block
         style = p.style.name
@@ -221,7 +227,7 @@ def docx_to_md(docx_path: str, md_path: str) -> dict:
     try:
         with os.fdopen(_tmp[0], "w", encoding="utf-8") as fh:
             fh.write(body)
-        os.replace(_tmp[1], md_path)
+        replace_with_retry(_tmp[1], md_path)
     except Exception:
         try:
             os.remove(_tmp[1])

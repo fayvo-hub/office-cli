@@ -13,6 +13,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import Cell
 from openpyxl.worksheet.worksheet import Worksheet
 
+from ._atomic import replace_with_retry
 from .errors import CliError
 
 #: openpyxl 支持的扩展名;.xls(旧二进制格式)不支持
@@ -233,7 +234,7 @@ def _save_once(wb: Workbook, path: str) -> None:
     os.close(fd)
     try:
         wb.save(tmp_path)
-        os.replace(tmp_path, path)
+        replace_with_retry(tmp_path, path)
     except OSError:
         raise
     finally:

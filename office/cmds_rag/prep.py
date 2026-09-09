@@ -23,6 +23,7 @@ import re
 import time
 
 from .. import ioplan, xlutil
+from .._atomic import replace_with_retry
 from ..cli import add_file_arg
 from ..errors import CliError
 
@@ -65,6 +66,9 @@ _MAX_UNRESOLVED = 10            # formula_unresolved 单块最多记录条数
 _MAX_BYTES = 100 * 1024 * 1024  # 超过 100MB 拒绝处理
 _PCT_RE = re.compile(r"0%|%$")          # number_format 含百分号形态(0%,0.0%,#%)
 _DATE_FMT_RE = re.compile(r"[ymdhis]", re.I)  # number_format 含日期占位
+# 颜色标记 [Red]/[Color 12] 里的字母会误命中日期占位(如 [Red] 的 d), 先剥掉
+_COLOR_TAG_RE = re.compile(r"\[(?:color\s*\d+|red|blue|green|yellow|"
+                           r"magenta|cyan|white|black)\]", re.I)
 
 _PAGEFOOT_RE = re.compile(r"^\s*第\s*\d+\s*页\s*[／/]\s*共\s*\d+\s*页\s*$")
 _PAGENO_RE = re.compile(r"^\s*第\s*\d+\s*页\s*$")
@@ -94,7 +98,7 @@ def _atomic_write(path: str, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except Exception:
         try:
             os.remove(tmp)
@@ -146,11 +150,14 @@ def _display(v, fmt: str | None):
             return f"{v * 100:g}%"
         if isinstance(v, float) and not math.isfinite(v):
             return None  # 非法数值(如除零结果)以空呈现
-        if _DATE_FMT_RE.search(f):
+        if _DATE_FMT_RE.search(_COLOR_TAG_RE.sub("", f)):
             # 日期格式下的裸数值 = Excel 日期序列 → ISO
             try:
                 from openpyxl.utils.datetime import from_excel
-                return from_excel(v).isoformat()
+                dx = from_excel(v)
+                if not re.search(r"[hHsS]", f) and dx.hour == dx.minute == 0:
+                    return dx.date().isoformat()
+                return dx.isoformat()
             except (ValueError, OverflowError):
                 pass
         if isinstance(v, float):
@@ -883,13 +890,12 @@ def _collect_inputs(src: str, recursive: bool) -> list[str]:
     files: list[str] = []
     for name in sorted(os.listdir(src)):
         p = os.path.join(src, name)
-        if os.path.isfile(p) and os.path.splitext(name)[1].lower() in _SUPPORTED:
+        if os.path.isfile(p) and not name.startswith("."):
             files.append(p)
         elif recursive and os.path.isdir(p) and not name.startswith("."):
             files.extend(_collect_inputs(p, recursive))
     if not files:
-        raise CliError("no_file", f"目录 {src} 中没有支持的文档"
-                                  f"({', '.join(sorted(_SUPPORTED))})")
+        raise CliError("no_file", f"目录 {src} 中没有文件")
     return files
 
 
@@ -924,6 +930,10 @@ def run(args: argparse.Namespace) -> dict:
             if size > _MAX_BYTES:
                 raise CliError("cannot_open", f"文件超过 {_MAX_BYTES // (1024 * 1024)}MB,"
                                               f"已拒绝处理(请拆分后重试)")
+            if ext not in _SUPPORTED:
+                raise CliError("unsupported_format",
+                               f"rag prep 暂不支持 '{ext}',仅支持: "
+                               f"{', '.join(sorted(_SUPPORTED))}")
             if ext in (".xlsx", ".xlsm", ".xls"):
                 r = _prep_xlsx(f)
             elif ext == ".csv":
