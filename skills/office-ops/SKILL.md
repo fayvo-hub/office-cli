@@ -1,6 +1,6 @@
 ---
 name: office-ops
-description: 通过 office-cli 命令读写/转换 Excel、Word、PDF、CSV/JSON 与 Markdown 排版文档。当用户要求生成/修改/读取 Excel 表(任意版本含 .xls)、合并拆分单元格、设置样式、插入图表图片、批量读写数据、处理 CSV/JSON 表格、读写 Word 文档、操作 PDF(合并/拆分/旋转/加密/解密/水印/提取文本/表格/图片/转图片)、把 Markdown 转成 PDF/Word/HTML、文档格式互转(含 .doc/.docx、老 .xls)时触发。
+description: 通过 office-cli 命令读写/转换 Excel、Word、PDF、CSV/JSON 与 Markdown 排版文档。当用户要求生成/修改/读取 Excel 表(任意版本含 .xls)、合并拆分单元格、设置样式、插入图表图片、批量读写数据、处理 CSV/JSON 表格、把 Excel/CSV 导出为 Markdown 表格或纯文本、读写/创建 Word 文档(标题/段落/表格/图片/代码块)、操作 PDF(合并/拆分/旋转/加密/解密/水印/提取文本/表格/图片/转图片)、把 Markdown 转成 PDF/Word/HTML、文档格式互转(含 .doc/.docx、老 .xls)时触发。
 ---
 
 # office-ops 技能:办公文档全格式操作(office-cli)
@@ -83,65 +83,85 @@ office info
 
 ### Excel(组前缀 excel)
 ```bash
-office excel list -f 表.xlsx                      # 概览: 表名/维度/合并区
-office excel read -f 表.xlsx --range A1:F20       # --cached 公式取缓存值; --sheet 选表
+office excel list -f 表.xlsx --preview 5         # 概览: 表名/维度/合并区 + 每表预览前 N 行(默认 3,0 关闭)
+office excel read -f 表.xlsx --range A1:F20       # 行数组 JSON; --sheet 选表; --cached 公式取缓存值
+office excel read -f 表.xlsx --range A1:F20 --cells   # 逐格输出(含类型/number_format); --limit N 行数上限(默认10000,0不限); --drop-empty-rows
+office excel write -f 表.xlsx --cell B2 --data 42
 office excel write -f 表.xlsx --cell A1 --data '[[1,2],[3,4]]'
 office excel write -f 表.xlsx --data '[["总分","=SUM(B2:B5)"]]' --sheet 成绩
 office excel write -f 新.xlsx --create --data '[[...]]'   # 新建(存在则报错,加 --overwrite 覆盖)
-office excel sheet add|rename|remove|copy|active ...
+office excel sheet add -f 表.xlsx --name 新表 --index 0   # add/rename/remove/copy/active; --index 0 起(默认末尾); 最后一个表不可 remove
 office excel style -f 表.xlsx --range A1:E1 --bold --fill '#FFF2CC' --align center --wrap
-office excel merge -f 表.xlsx --range A1:C1 --center     # --unmerge 取消
-office excel chart add -f 表.xlsx --type bar --data A1:B6 --at F2 --title 季度   # bar|col|line|pie
-office excel image add -f 表.xlsx --image logo.png --at D2 --scale 0.5   # 或 --width 300(px)
-office excel pivot list -f 表.xlsx                 # 透视表清单; set-source --name 表 --ref A1:F100
+office excel merge -f 表.xlsx --range A1:C1 --center     # --unmerge 取消; --discard-others 丢弃区域内其他值
+office excel chart add -f 表.xlsx --type bar --data A1:B6 --at F2 --title 季度   # bar|col|line|pie; --at 默认数据右下
+office excel image add -f 表.xlsx --image logo.png --at D2 --scale 0.5   # --width px 与 --scale 二选一; 默认锚 A1
+office excel pivot list -f 表.xlsx               # 透视表清单(名称/所在表/数据源范围); 只能操作已存在的透视表,不能新建
+office excel pivot set-source -f 表.xlsx --name 表 --ref A1:F100  # 改数据源(须含表头); 默认设 refreshOnLoad, --no-refresh 关闭
 ```
-要点:默认写首个空行;合并区内写入报 `merged_cell`(只能写左上角);公式格默认读出公式文本(想拿结果加 `--cached`,但 openpyxl 写的文件无缓存);布尔写 true/false,清格写 null。
+要点:
+- write 是**覆盖式**:从 `--cell` 起点(默认 A1)直接写,会**覆盖原区域内容**;想追加到末尾须先 read 算出空行再指定 `--cell`。一维数组自上而下成列,二维按矩形写。
+- 值约定:null 清格;true/false 写布尔;`=` 开头的字符串按公式(如 `"=SUM(A1:A9)"`),想存为文本加 `--literal`;日期给 ISO 字符串(如 `2024-03-05T00:00:00`)。
+- 合并区内写入报 `merged_cell`(只能写左上角);read 的公式格默认输出公式文本,加 `--cached` 取缓存值(openpyxl 写出的文件一般无缓存,取不到仍回退公式文本)。
+- style 全部参数: `--font-name --font-size --bold --italic --underline --font-color(hex) --fill(hex|none 清除) --align --valign --wrap --border --border-color --num-format`;布尔参数可写成 `--bold` 或 `--bold true/false`。
 
 ### Word(组前缀 word)
 ```bash
-office word read -f 报告.docx                     # 段落/表格/图片元数据; --save-images dir 导出图片
-office word write -f 报告.docx --create --text '标题内容'     # 不存在则新建; 存在=追加
+office word read -f 报告.docx                     # 段落/表格/图片元数据; --limit N(默认500,0不限); --no-tables 跳过表格; --save-images DIR 导出图片(默认只列图片清单)
+office word write -f 报告.docx --create --text '标题内容'     # 不存在则新建; 存在=末尾追加
 office word write -f 报告.docx --data-file blocks.json
 ```
-blocks JSON: `{"blocks":[{"type":"h","level":1,"text":"…"},{"type":"p","text":"…","bold":true,"color":"#333333"},{"type":"p","runs":[{"text":"重点","bold":true}]},{"type":"code","text":"…"},{"type":"quote","text":"…"},{"type":"table","rows":[[…]]},{"type":"img","path":"logo.png","width_cm":6},{"type":"pagebreak"}]}`。表格首行默认加粗(表头),`--no-header` 取消。
+blocks JSON(顶层 `{"blocks": [...]}`,块类型缺省 p):
+```json
+{"blocks": [
+  {"type": "h", "level": 1, "text": "一级标题"},
+  {"type": "p", "text": "普通段落", "align": "center", "color": "#333333", "size": 12},
+  {"type": "p", "runs": [{"text": "重点", "bold": true, "color": "E00000"}, {"text": "普通", "italic": true}]},
+  {"type": "code", "text": "print(1)"},
+  {"type": "quote", "text": "引用语"},
+  {"type": "table", "rows": [["列A", "列B"], [1, 2]]},
+  {"type": "img", "path": "logo.png", "width": 8},
+  {"type": "pagebreak"}
+]}
+```
+块说明:h=标题(level 1-9);p 可 `text` 或 `runs[]`(逐段富文本:bold/italic/code 等宽/color 6位hex/size pt,也可块级统一设);code=等宽灰底;quote=斜体+左缩进;table=二维 rows、网格边框、**首行默认加粗**(表头,加 `--no-header` 取消);img=`path`+`width`(单位厘米,默认 15);pagebreak=分页。
 
 ### PDF(组前缀 pdf)
 ```bash
 office pdf info -f 文档.pdf                       # 页数/尺寸/加密(加密文件页数=null, 需先解密)
-office pdf read -f 文档.pdf --pages 1-3 --tables  # 文本提取(可选表格)
-office pdf merge -f a.pdf b.pdf --out c.pdf       # 合并
-office pdf split -f a.pdf --pages 1-3,5 --out-dir d/   # 或 --out 单文件; 缺省全部页
-office pdf rotate -f a.pdf --angle 90             # 90/180/270, 默认原地
-office pdf encrypt -f a.pdf --password 'pw' --out e.pdf   # AES-256; decrypt 同构
-office pdf watermark -f a.pdf --text '内部资料' --opacity 0.15 --out w.pdf
-office pdf images -f a.pdf --out-dir imgs/        # 抽内嵌图; 无图报 no_images
-office pdf to-image -f a.pdf --out-dir png/ --dpi 150 --pages 1   # 整页转 PNG
+office pdf read -f 文档.pdf --pages 1-3 --tables  # 文本提取(可选逐页表格); --max-chars 每页字符上限(默认8000,0不限)
+office pdf merge -f a.pdf b.pdf --out c.pdf       # 按给出顺序合并
+office pdf split -f a.pdf --pages 1-3,5 --out part.pdf   # 抽页成新 PDF; --out-dir d/ 则每页一文件(a_p001.pdf); --pages 缺省全部,支持开区间 5-
+office pdf rotate -f a.pdf --angle 90             # 90/180/270; --page 1-3,5 只转指定页(缺省全部); 默认原地, --out 另存
+office pdf encrypt -f a.pdf --password 'pw' --out e.pdf   # AES-256; --owner 另设所有者密码(默认同用户密码); decrypt 同构
+office pdf watermark -f a.pdf --text '内部资料' --opacity 0.15 --out w.pdf   # --size pt(默认按页高12%自动); --no-rotate 不旋转
+office pdf images -f a.pdf --out-dir imgs/        # 抽内嵌图(命名 p页码-序号); 无图报 no_images
+office pdf to-image -f a.pdf --out-dir png/ --dpi 150 --pages 1   # 整页转 PNG(默认 150dpi, --pages 缺省全部)
 ```
 错误码: 已加密操作未解密文件=encrypted;解密密码错=bad_password;文件未加密却 decrypt=not_encrypted。
 
 ### Markdown 排版(md 组,样式/代码高亮/mermaid 图)
 ```bash
-office md to-pdf -f 说明.md --out 说明.pdf        # A4、页码; 需本机 Chrome/Edge
+office md to-pdf -f 说明.md --out 说明.pdf        # A4、页码; --css '自定义样式串' 可追加样式; 需本机 Chrome/Edge
 office md to-docx -f 说明.md --out 说明.docx
 office md to-html -f 说明.md --out 说明.html
-office convert -f 说明.md --to pdf --out 说明.pdf # 等价
 ```
 支持标题层级/表格/引用/图片(md 同目录相对路径)/代码块高亮/mermaid 代码块;A4 排版带页码。
 
-### 跨格式转换(顶层 convert,方向自动判定)
+### 跨格式转换(顶层 convert,方向按 --out 后缀自动判定,也可 --to 显式指定)
 ```bash
 office convert -f 表.xlsx --out 表.csv            # xlsx→csv(带表头+BOM)
 office convert -f 表.csv --out 表.xlsx            # csv→xlsx
-office convert -f 表.xlsx --to json --out 表.json # json 互转同理; xlsx→csv 支持 --sheet/--range
-office convert -f 表.xlsx --out 表.md            # 导出 Markdown 表格(供直接贴进文档/问答)
+office convert -f 表.xlsx --to json --out 表.json # json 互转同理; 所有 xlsx 源转换都支持 --sheet/--range/--cached
+office convert -f 表.xlsx --out 表.md            # 导出 Markdown 表格(首行作表头)
 office convert -f 表.xlsx --out 表.txt           # 导出 TSV 制表符文本(信息无损)
-office convert -f 旧.xls --out 新.xlsx            # 老格式升级(WPS)
-office convert -f 报告.docx --out 报告.pdf        # Word→PDF 走 WPS 保真排版
+office convert -f 旧.xls --out 新.xlsx            # 老格式升级(WPS,原文件不动)
+office convert -f 报告.docx --out 报告.pdf        # Word→PDF 走 WPS 保真排版(--engine 可选,默认 wps)
 office convert -f 文档.pdf --to docx --out 文档.docx   # pdf2docx 版面还原
 office convert -f 报告.docx --to md --out 报告.md  # docx→md 结构近似
-office convert -f 说明.md --to pdf --out 说明.pdf
+office convert -f 说明.md --out 说明.pdf           # md→pdf 默认样式(精细控制用 md to-pdf);也可 --css 文件路径定制
+office convert -f 说明.md --out 说明.html          # md→html 同样通 convert
 ```
-CSV→xlsx 会做类型推断(数字/布尔/日期),`--no-infer` 关闭;`--delimiter`/`--encoding` 可强制。
+支持矩阵: xlsx/xlsm/xls→csv|json|xlsx|md|txt(xls 自动升级);csv→xlsx|json|md|txt;json→xlsx|md|txt;doc/docx→pdf(doc 自动升级)、docx→md、doc→docx;pdf→docx;md→pdf|docx|html。CSV→xlsx 会做类型推断(数字/布尔/日期),`--no-infer` 关闭;`--delimiter`/`--encoding` 可强制;输出已存在直接覆盖,输入输出同路径报 same_file。
 
 ## 工作流建议
 
