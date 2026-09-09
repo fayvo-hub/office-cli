@@ -229,7 +229,7 @@ def save_workbook_atomic(wb: Workbook, path: str) -> None:
 def _save_once(wb: Workbook, path: str) -> None:
     directory = os.path.dirname(os.path.abspath(path))
     name = os.path.basename(path)
-    fd, tmp_path = tempfile.mkstemp(prefix=".xcli-tmp-", suffix=name, dir=directory)
+    fd, tmp_path = tempfile.mkstemp(prefix=".office-tmp-", suffix=name, dir=directory)
     os.close(fd)
     try:
         wb.save(tmp_path)

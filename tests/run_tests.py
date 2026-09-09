@@ -1,4 +1,4 @@
-"""xcli 端到端测试:每个用例用 subprocess 调用真实 CLI,校验退出码与 JSON 输出。
+"""office-cli 端到端测试:每个用例用 subprocess 调用真实 CLI,校验退出码与 JSON 输出。
 
 运行: python tests/run_tests.py   (在项目根目录)
 输出: 每行 PASS/FAIL,最后汇总;失败可加环境变量 VERBOSE=1 打印输出详情。

@@ -1,5 +1,0 @@
-# 必需
-openpyxl>=3.1
-
-# 可选:仅 xcli image add 命令需要(插入/处理图片)
-# Pillow>=10.0

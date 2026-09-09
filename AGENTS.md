@@ -41,7 +41,7 @@ skills/office-ops/       # office-ops 技能的仓库源(全局副本在 ~/.pi/a
 
 - 版本号**两处**同步:`pyproject.toml` 的 `version` 与 `office/__init__.py` 的 `__version__`(遗漏会导致 exe 报旧版,需重打)。
 - 发布完整流程调用 `.pi/skills/release-office-cli` 技能(bump→测试→build_exe.py→.smoke 冒烟→gh release create/upload→SHA256 校验)。`office.exe` 单文件约 123MB,不含 playwright(md→pdf 在 exe 内不可用属预期,报 need_dep)。
-- Git:单远程 `origin` = https://github.com/fayvo-hub/office-cli.git(阿里云 codeup 旧源已删)。推送用 `git push origin master`;直连 GitHub 被重置时用 `git -c http.proxy=http://127.0.0.1:7897 push origin master`(`-c` 在子命令前)。
+- Git:单远程 `origin` = https://github.com/fayvo-hub/office-cli.git。推送用 `git push origin master`;直连 GitHub 被重置时用 `git -c http.proxy=http://127.0.0.1:7897 push origin master`(`-c` 在子命令前)。
 
 ## 测试
 

@@ -5,7 +5,7 @@ description: 发布 office-cli 新版本(重打包单文件 exe + 发 GitHub Rel
 
 # office-cli 发布流程
 
-在仓库根 `C:/Users/Administrator/AppData/Roaming/pi-desktop/chat-workspace/office-cli` 执行(或任意 office-cli clone 的根)。全程用 Git Bash。仓库单远程 `origin` = https://github.com/fayvo-hub/office-cli.git(阿里云 codeup 旧源已删),发布目标分支 master。本机直连 GitHub 会被重置,推送统一用 `git -c http.proxy=http://127.0.0.1:7897 push origin master`(`-c` 必须放子命令**前**,`git push -c` 会报 unknown switch)。
+在仓库根 `C:/Users/Administrator/AppData/Roaming/pi-desktop/chat-workspace/office-cli` 执行(或任意 office-cli clone 的根)。全程用 Git Bash。仓库单远程 `origin` = https://github.com/fayvo-hub/office-cli.git,发布目标分支 master。本机直连 GitHub 会被重置,推送统一用 `git -c http.proxy=http://127.0.0.1:7897 push origin master`(`-c` 必须放子命令**前**,`git push -c` 会报 unknown switch)。
 
 ## 0. 前置检查
 
@@ -72,7 +72,7 @@ gh release view vX.Y.Z --json isDraft,isPrerelease,assets
 
 - 直连下载常被重置,curl 必须走 `-x http://127.0.0.1:7897`。
 - 发布瞬间资产可能假 404(CDN 延迟)或返回元数据 JSON(需 `Accept: application/octet-stream`),多试一次并用 SHA256 定论。
-- 发布与文档提交都只走 `origin`(GitHub);阿里云 codeup 旧源已删除,仓库不存在其他远程。
+- 发布与文档提交只走 `origin`(仓库唯一远程,指向 GitHub)。
 
 ## 6. 收尾
 
