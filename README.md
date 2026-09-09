@@ -118,6 +118,7 @@ office convert -f 页.html --to pdf  # HTML → PDF(Chrome 渲染)
 office md to-pdf           # Markdown → PDF(样式/代码高亮/mermaid)
 office md to-docx          # Markdown → Word
 office md to-html          # Markdown → 自包含 HTML
+office rag prep            # RAG 清洗: Office/PDF → 语义重建 md+JSON(见下)
 office info                # 环境自检: 依赖/引擎/样本路径
 ```
 
@@ -220,6 +221,31 @@ office pdf from-images -f 扫描件.pdf --out 扫描.pdf a.jpg b.png   # 图片�
 ```
 
 加密文件先 `decrypt` 后才能 read/merge/split/rotate/watermark。
+
+### rag 组(RAG 数据清洗)
+
+```bash
+# 单文件: 同目录生成 <名>.md + <名>.json
+office rag prep -f 报表.xlsx
+office rag prep -f 报表.xls --out-dir clean/        # 老格式自动升级
+# 批量目录: 另写 qa.json 质检汇总(坏文件/公式未解析上库前暴露)
+office rag prep -f 文档目录/ --out-dir clean/ --recursive
+# xlsx 表头判定手动兜底: auto 自动(默认) / N 固定行数 / 0 无表头
+office rag prep -f 表.xlsx --header-rows 2
+```
+
+支持 .xlsx/.xlsm/.xls/.docx/.doc/.pdf。与普通转换的关键差异(xlsx 语义重建):
+
+- **多 sheet 全量导出**,不做静默截断
+- **合并单元格展开**: 纵向向下/横向向右填充,每个数据行带完整归属维度(如"华东"不丢);
+  顶部整行合并的标题识别为标题文本,不混入表头
+- **多行表头按列合成层级标签**(如 `2023年 / 上半年`),纵向合并导致的重复自动去重
+- **公式格**: 有缓存值用缓存值,无缓存保留公式原文并记入 json 的 `formula_unresolved`
+- **去噪**: PDF 页脚/页码整行去除(含 ⻚ 兼容字符),docx 标题层级保留
+- 目录模式 `qa.json` 汇总每个文件的行数/表数/告警;单文件失败不中断批量
+
+已知局限(MVP): 纯文本表(无数值/公式行)按内容行输出并提示;公式无缓存时不求值(不引入计算引擎);
+二维合并块仅保留左上角值(记 warning)。
 
 ### html → pdf
 

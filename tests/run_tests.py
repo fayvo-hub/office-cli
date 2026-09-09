@@ -836,6 +836,45 @@ def main() -> int:
         expect_ok("ppt to-pdf 老格式", "ppt", "to-pdf", "-f", legacy_ppt,
                   "--out", wpath("ppt_old.pdf"))
 
+    # ---------- rag prep ----------
+    rsrc = wpath("rag_src.xlsx")
+    expect_ok("rag 建源表", "write", "--create", "-f", rsrc,
+              "--data", json.dumps([["月份", "销量"], ["2024-01", 990.0]]))
+    out = expect_ok("rag prep 单文件", "rag", "prep", "-f", rsrc,
+                    "--out-dir", WORK)
+    check("rag prep 产物落盘", out and out["md"].startswith(WORK)
+          and os.path.exists(out["md"]) and os.path.exists(out["json"]),
+          str(out))
+    with open(out["md"], encoding="utf-8") as fh:
+        md_text = fh.read()
+    check("rag md 语义保留", "月份" in md_text and "2024-01" in md_text
+          and "990" in md_text)
+    with open(out["json"], encoding="utf-8") as fh:
+        doc = json.load(fh)
+    chk = (doc.get("sheets") or [])[0]
+    check("rag json 表头/行", doc.get("format") == "xlsx" and chk
+          and chk["columns"] == ["月份", "销量"]
+          and chk["rows"][0] == ["2024-01", 990.0],
+          str(doc.get("sheets")))
+    # demo.xlsx 含合并区 A16:B16 + 16 数据行 → 合并展开且行不丢
+    out = expect_ok("rag prep 合并样本", "rag", "prep", "-f", demo,
+                    "--out-dir", wpath("rag_dir"))
+    with open(out["json"], encoding="utf-8") as fh:
+        doc = json.load(fh)
+    chk = (doc.get("sheets") or [])
+    total_rows = sum(len(s["rows"]) for s in chk)
+    check("rag 合并展开行完整", chk and total_rows >= 18
+          and any(s["columns"] and "月份" in s["columns"][0] for s in chk),
+          str(doc and total_rows))
+    out = expect_ok("rag prep 目录批量", "rag", "prep", "-f", WORK,
+                    "--out-dir", wpath("rag_dir"))
+    check("rag qa.json 汇总", out and out.get("total", 0) >= 1
+          and os.path.exists(wpath("rag_dir/qa.json")), str(out))
+    expect_err("rag prep 不支持扩展", "unsupported_format", "rag", "prep",
+               "-f", copy_sample("sample.md"))
+    expect_err("rag prep 目录无文档", "no_file", "rag", "prep", "-f",
+               wpath("rag_dir"))
+
     # ---------- 汇总 ----------
     print()
     print(f"==== {_passed} passed, {_failed} failed ====")

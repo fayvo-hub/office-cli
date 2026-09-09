@@ -1,6 +1,6 @@
 ---
 name: office-ops
-description: 通过 office-cli 命令读写/转换 Excel、Word、PDF、CSV/JSON 与 Markdown 排版文档。当用户要求生成/修改/读取 Excel 表(任意版本含 .xls)、合并拆分单元格、设置样式、插入图表图片、批量读写数据、处理 CSV/JSON 表格、把 Excel/CSV 导出为 Markdown 表格或纯文本、读写/创建 Word 文档(标题/段落/表格/图片/代码块)、操作 PDF(合并/拆分/旋转/加密/解密/水印/提取文本/表格/图片/转图片)、把 Markdown 转成 PDF/Word/HTML、文档格式互转(含 .doc/.docx、老 .xls)时触发。
+description: 通过 office-cli 命令读写/转换 Excel、Word、PDF、CSV/JSON 与 Markdown 排版文档。当用户要求生成/修改/读取 Excel 表(任意版本含 .xls)、合并拆分单元格、设置样式、插入图表图片、批量读写数据、处理 CSV/JSON 表格、把 Excel/CSV 导出为 Markdown 表格或纯文本、读写/创建 Word 文档(标题/段落/表格/图片/代码块)、操作 PDF(合并/拆分/旋转/加密/解密/水印/提取文本/表格/图片/转图片)、把 Markdown 转成 PDF/Word/HTML、文档格式互转(含 .doc/.docx、老 .xls)、或为 RAG/知识库/大模型导入准备/清洗文档(合并单元格展开、多级表头合成、多 sheet 全量导出、公式缓存、页脚去噪,生成结构化 md+JSON)时触发。
 ---
 
 # office-ops 技能:办公文档全格式操作(office-cli)
@@ -213,6 +213,14 @@ office convert -f 说明.md --out 说明.html          # md→html 同样通 con
 office convert -f 页面.html --to pdf --out 页面.pdf  # HTML→PDF(Chrome 渲染,同 md to-pdf 引擎;纯文本/CSS 均支持)
 ```
 支持矩阵: xlsx/xlsm/xls→csv|json|xlsx|md|txt(xls 自动升级);csv→xlsx|json|md|txt;json→xlsx|md|txt;doc/docx→pdf(doc 自动升级)、docx→md、doc→docx;pdf→docx;md→pdf|docx|html。CSV→xlsx 会做类型推断(数字/布尔/日期),`--no-infer` 关闭;`--delimiter`/`--encoding` 可强制;输出已存在直接覆盖,输入输出同路径报 same_file。
+
+### RAG 数据清洗(rag 组,语义重建后供 LLM/知识库导入)
+```bash
+office rag prep -f 报表.xlsx --out-dir clean/        # → clean/报表.md + 报表.json
+office rag prep -f 文档目录/ --out-dir clean/         # 批量; 另写 clean/qa.json 质检汇总
+office rag prep -f 表.xlsx --header-rows 2           # 表头行数手动兜底(auto 默认)
+```
+支持 .xlsx/.xlsm/.xls/.docx/.doc/.pdf(.xls 老格式自动升级)。核心能力: 多 sheet **全量**导出(不静默截断);纵向/横向合并单元格展开(每数据行带完整归属维度);顶部整行合并标题识别;多行表头按列合成(如 `2023年 / 上半年`);公式格优先缓存值、无缓存保留原文并记 `formula_unresolved`;PDF 页脚/页码整行去噪(含 ⻚ 兼容字符)。产物: `<名>.md`(LLM 友好)+ `<名>.json`(headers/columns/rows/row_numbers/warnings 结构化),批量另附 qa.json(行数/表数/公式未解析/告警,坏文件不中断)。局限: 纯文本表按内容行输出并提示;公式无缓存不求值。
 
 ## 工作流建议
 

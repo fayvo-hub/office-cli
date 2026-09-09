@@ -57,6 +57,7 @@ _GROUP_MODS = {
             "watermark", "images", "to-image", "from-images", "footer", "search"],
     "md": ["to-pdf", "to-docx", "to-html"],
     "ppt": ["read", "write", "to-pdf"],
+    "rag": ["prep"],
 }
 
 
