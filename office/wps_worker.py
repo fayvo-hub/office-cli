@@ -182,7 +182,8 @@ def worker_main(payload: dict | str) -> int:
         print(json.dumps({"ok": False, "error": f"未知 op: {op}"}))
         return 1
     try:
-        fn(job["src"], job["dst"])
+        # COM(WPS 服务进程)无法解析调用方相对路径,统一转绝对路径
+        fn(os.path.abspath(job["src"]), os.path.abspath(job["dst"]))
         print(json.dumps({"ok": True}))
         return 0
     except Exception as e:  # noqa: BLE001 - worker 出口,全部转 JSON

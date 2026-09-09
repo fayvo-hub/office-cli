@@ -12,7 +12,7 @@ import tempfile
 
 from docx import Document
 from docx.oxml.ns import qn
-from docx.table import Table
+from docx.table import Table, _Cell  # noqa: PLC2701 — python-docx 无公开 Cell 名
 from docx.text.paragraph import Paragraph
 
 from .errors import CliError
@@ -92,19 +92,34 @@ def _cell_md(cell) -> str:
 
 
 def _table_md(t: Table) -> str:
+    """表格 -> markdown。按 XML 单元格(tc)遍历,展开 gridSpan、跳过 vMerge
+    continue 行(避免 python-docx row.cells 把合并文本重复到整列)。"""
     lines: list[str] = []
-    ncols = len(t.columns)
-    for i, row in enumerate(t.rows):
-        cells = []
-        for j in range(ncols):
-            try:
-                cell = row.cells[j]
-            except IndexError:
-                cell = None
-            cells.append(_cell_md(cell) if cell is not None else "")
+    ncols = len(t.columns)   # grid 总列数(=各 tc gridSpan 之和)
+    first = True
+    for row in t.rows:
+        cells: list[str] = []
+        for tc in row._tr.tc_lst:
+            tcPr = tc.tcPr
+            span, cont = 1, False
+            if tcPr is not None:
+                gs = tcPr.find(qn("w:gridSpan"))
+                if gs is not None:
+                    span = int(gs.get(qn("w:val")) or 1)
+                vm = tcPr.find(qn("w:vMerge"))
+                if vm is not None and (vm.get(qn("w:val")) or "restart") == "continue":
+                    cont = True
+            if cont:
+                cells.extend([""] * span)   # 纵向合并的后续行: 空格,不重复
+            else:
+                cell = _Cell(tc, t)
+                cells.extend([_cell_md(cell)] * span)
+        if len(cells) < ncols:               # 行尾缺格补空,保证列对齐
+            cells.extend([""] * (ncols - len(cells)))
         lines.append("| " + " | ".join(cells) + " |")
-        if i == 0:
+        if first:
             lines.append("| " + " | ".join("---" for _ in range(ncols)) + " |")
+            first = False
     return "\n".join(lines)
 
 

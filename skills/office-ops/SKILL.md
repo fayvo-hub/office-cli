@@ -219,13 +219,22 @@ office convert -f 页面.html --to pdf --out 页面.pdf  # HTML→PDF(Chrome 渲
 office rag prep -f 报表.xlsx --out-dir clean/        # → clean/报表.md + 报表.json
 office rag prep -f 文档目录/ --out-dir clean/         # 批量; 另写 clean/qa.json 质检汇总
 office rag prep -f 表.xlsx --header-rows 2           # 表头行数手动兜底(auto 默认)
+office rag prep -f 台账.csv                          # CSV/文本直接摄取(自动编码/分隔符)
 ```
-支持 .xlsx/.xlsm/.xls/.docx/.doc/.pdf(.xls 老格式自动升级)。核心能力: 多 sheet **全量**导出(不静默截断);纵向/横向合并单元格展开(每数据行带完整归属维度);顶部整行合并标题识别;多行表头按列合成(如 `2023年 / 上半年`);公式格优先缓存值、无缓存保留原文并记 `formula_unresolved`;PDF 页脚/页码整行去噪(含 ⻚ 兼容字符)。产物: `<名>.md`(LLM 友好)+ `<名>.json`(headers/columns/rows/row_numbers/warnings 结构化),批量另附 qa.json(行数/表数/公式未解析/告警,坏文件不中断)。局限: 纯文本表按内容行输出并提示;公式无缓存不求值。
+支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.pdf/.txt(.xls/.doc 老格式自动升级;>100MB 拒绝)。
+核心能力: 多 sheet **全量**导出(隐藏表剔除);纵向/横向/二维合并块展开;一个 sheet 多张表分块+备注 notes 段;
+顶部整行/短合并标题与副标题识别(不混入表头);多行表头按列合成(如 `2023年 / 上半年`);
+**内置公式求值器**(IF/SUMIF/COUNTIF/ROUND/文本/日期/跨表引用,无缓存公式直接算),算不了回退缓存、
+再无保留原文记 `formula_unresolved`;百分比/日期按 number_format 渲染;PDF 页脚/页码去噪;
+docx 表格合并单元格展开不重复。产物: `<名>.md`(LLM 友好)+ `<名>.json`
+(sheets[].blocks[]: table/notes,含 columns/headers/rows/row_numbers/unresolved/warnings),批量另附
+qa.json(行数/表数/公式未解析/告警/大小/耗时,坏文件不中断)。局限: 表头自动判定以真实规范表格为
+目标,畸形堆叠(粘连的注行+孤儿行)可能误判,可 --header-rows 兜底。
 
 ## 工作流建议
 
 1. **先摸底**: `office excel list` / `office pdf info` / `office word read` 看结构再动手;改动前先 read 相关区域。
 2. **小步快跑**: 大批量/多步操作拆成多条命令,每条校验返回 JSON 的 `ok` 与 `warnings`;出错看 `error.code` 与中文 `message` 自行修正(如 no_file/merged_cell/same_file)。
 3. **临时数据**: 生成 JSON 到临时文件再 `--data-file`;不要 inline 长 JSON。
-4. **样本练习**: `office-cli/samples/` 下有 demo.xlsx(含公式缓存版 demo_cached.xlsx)、demo_pivot.xlsx、sample.docx、sample.md、legacy.xls、legacy.doc、gbk.csv——需要真实素材验证时用它们。
+4. **样本练习**: `office-cli/samples/` 下有 demo.xlsx(含公式缓存版 demo_cached.xlsx)、demo_pivot.xlsx、sample.docx、sample.md、legacy.xls、legacy.doc、gbk.csv——需要真实素材验证时用它们;RAG 复杂物料在 `rag-wps-samples/`(WPS/python-docx 外部生成,含多级表头/公式/跨表/隐藏表/老 .xls/docx 合并表,配套生成脚本可改参数重造)。
 5. **权限说明**: 文件被 Excel/WPS 占用时写操作报 `file_busy`,让用户先关闭程序重试。

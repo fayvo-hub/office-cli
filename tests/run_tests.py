@@ -995,21 +995,36 @@ def main() -> int:
           and "990" in md_text)
     with open(out["json"], encoding="utf-8") as fh:
         doc = json.load(fh)
-    chk = (doc.get("sheets") or [])[0]
-    check("rag json 表头/行", doc.get("format") == "xlsx" and chk
-          and chk["columns"] == ["月份", "销量"]
-          and chk["rows"][0] == ["2024-01", 990.0],
+    sh0 = (doc.get("sheets") or [])[0]
+    blk0 = (sh0.get("blocks") or [{}])[0]
+    check("rag json 表头/行", doc.get("format") == "xlsx" and sh0
+          and blk0.get("columns") == ["月份", "销量"]
+          and (blk0.get("rows") or [])[0] == ["2024-01", 990.0],
           str(doc.get("sheets")))
-    # demo.xlsx 含合并区 A16:B16 + 16 数据行 → 合并展开且行不丢
+    # demo.xlsx 含公式/合并区/多sheet → 公式全解 + 合并展开 + 行不丢
     out = expect_ok("rag prep 合并样本", "rag", "prep", "-f", demo,
                     "--out-dir", wpath("rag_dir"))
     with open(out["json"], encoding="utf-8") as fh:
         doc = json.load(fh)
     chk = (doc.get("sheets") or [])
-    total_rows = sum(len(s["rows"]) for s in chk)
-    check("rag 合并展开行完整", chk and total_rows >= 18
-          and any(s["columns"] and "月份" in s["columns"][0] for s in chk),
+    tbl_blocks = [b for s in chk for b in s.get("blocks", [])
+                  if b.get("type") == "table"]
+    total_rows = sum(len(b.get("rows") or []) for b in tbl_blocks)
+    check("rag 合并展开行完整", tbl_blocks and total_rows >= 18
+          and any(b.get("columns") and "月份" in b["columns"][0]
+                  for b in tbl_blocks)
+          and any("金额" in (b.get("columns") or []) for b in tbl_blocks),
           str(doc and total_rows))
+    # 销售表公式无缓存(openpyxl 写死文本)→ 求值器全解, 合计行并入前表
+    sales = next(s for s in chk if s["name"] == "销售")
+    sb = sales["blocks"]
+    unresolved = [u for b in sb if b["type"] == "table"
+                  for u in (b.get("formula_unresolved") or [])]
+    chk2 = (len(sb) == 1 and sb[0]["type"] == "table"
+            and len(sb[0]["rows"]) == 14        # 12 数据行 + 2 合计行
+            and not unresolved                      # 公式全部解出
+            and sb[0]["row_numbers"][-1] == 16)    # 末尾原表行 16
+    check("rag 公式全解+合计续接", chk2, str((sb, unresolved)))
     out = expect_ok("rag prep 目录批量", "rag", "prep", "-f", WORK,
                     "--out-dir", wpath("rag_dir"))
     check("rag qa.json 汇总", out and out.get("total", 0) >= 1
@@ -1018,6 +1033,36 @@ def main() -> int:
                "-f", copy_sample("sample.md"))
     expect_err("rag prep 目录无文档", "no_file", "rag", "prep", "-f",
                wpath("rag_dir"))
+    # csv(标准库直写, 非 office-cli 自产)/txt/docx 链路
+    import csv as _csv
+    csvp = wpath("rag_src.csv")
+    with open(csvp, "w", encoding="utf-8-sig", newline="") as fh:
+        _csv.writer(fh).writerows([["型号", "数量"], ["A-1", 3], ["B-2", 5]])
+    out = expect_ok("rag prep csv", "rag", "prep", "-f", csvp,
+                    "--out-dir", WORK)
+    with open(out["json"], encoding="utf-8") as fh:
+        doc = json.load(fh)
+    csvb = ((doc.get("sheets") or [{}])[0].get("blocks") or [])
+    check("rag csv 表/行", doc.get("format") == "csv" and csvb
+          and csvb[0]["type"] == "table"
+          and csvb[0]["columns"] == ["型号", "数量"]
+          and len(csvb[0]["rows"]) == 2, str(doc))
+    txtp = wpath("rag_note.txt")
+    with open(txtp, "w", encoding="utf-8") as fh:
+        fh.write("交接班说明\n夜班共完成 12 批,全部合格。")
+    out = expect_ok("rag prep txt", "rag", "prep", "-f", txtp,
+                    "--out-dir", WORK)
+    with open(out["json"], encoding="utf-8") as fh:
+        doc = json.load(fh)
+    txtb = ((doc.get("sheets") or [{}])[0].get("blocks") or [])
+    check("rag txt 段落", doc.get("format") == "txt" and txtb
+          and txtb[0]["type"] == "notes"
+          and "夜班" in (txtb[0].get("text") or ""), str(doc))
+    out = expect_ok("rag prep docx", "rag", "prep", "-f",
+                    sample_docx, "--out-dir", wpath("rag_dir"))
+    md_docx = open(out["md"], encoding="utf-8").read()
+    check("rag docx 标题表保留", out and out["md"].startswith(WORK)
+          and ("# " in md_docx or "| " in md_docx), str(out))
 
     # ---------- rag 公式求值器(内存直测) ----------
     formula_checks()
