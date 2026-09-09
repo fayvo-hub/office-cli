@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "office-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "面向 AI 调用的办公文档 CLI:Excel/Word/PDF/Markdown/PowerPoint 读写与互转(JSON 输入输出)"
 requires-python = ">=3.9"
 dependencies = [
