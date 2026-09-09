@@ -22,7 +22,8 @@ WORK = os.path.join(ROOT, ".test-data")
 
 # excel 组的命令名(旧测试直接以命令名开头,自动补组前缀)
 _EXCEL_CMDS = {"list", "read", "write", "sheet", "style", "merge",
-               "chart", "image", "pivot"}
+               "chart", "image", "pivot", "layout", "cond-format",
+               "comment", "validate", "insert", "delete", "replace"}
 
 VERBOSE = os.environ.get("VERBOSE") == "1"
 _passed = 0
@@ -383,6 +384,146 @@ def main() -> int:
     out = expect_ok("pivot list 无透视表文件", "pivot", "list", "-f", demo)
     check("pivot list 空", out and out["pivots"] == [], str(out))
 
+    # ---------- layout(列宽/行高/冻结/筛选/隐藏) ----------
+    lx = wpath("layout.xlsx")
+    shutil.copy(demo, lx)
+    out = expect_ok("layout 列宽行高", "layout", "-f", lx, "--sheet", "销售",
+                    "--col-width", "A=18,B=20", "--row-height", "1=30")
+    check("layout applied 2 项", out and len(out.get("applied", [])) == 2,
+          str(out))
+    lws = load_workbook(lx)["销售"]
+    check("layout 列宽落盘", lws.column_dimensions["A"].width == 18
+          and lws.row_dimensions[1].height == 30, "")
+    out = expect_ok("layout 冻结+筛选", "layout", "-f", lx, "--sheet", "销售",
+                    "--freeze", "A2", "--filter", "A1:E16")
+    lws = load_workbook(lx)["销售"]
+    check("layout 冻结/筛选落盘", lws.freeze_panes == "A2"
+          and lws.auto_filter.ref == "A1:E16", str(lws.freeze_panes))
+    expect_ok("layout 隐藏列 D:E", "layout", "-f", lx, "--sheet", "销售",
+              "--hide-cols", "D:E")
+    lws = load_workbook(lx)["销售"]
+    check("layout 隐藏落盘", lws.column_dimensions["D"].hidden is True, "")
+    expect_ok("layout 显示列", "layout", "-f", lx, "--sheet", "销售",
+              "--show-cols", "D:E")
+    expect_err("layout 非法列宽", "bad_args", "layout", "-f", lx,
+               "--sheet", "销售", "--col-width", "Z=abc")
+
+    # ---------- cond-format / comment / validate ----------
+    cf = wpath("cf.xlsx")
+    shutil.copy(demo, cf)
+    expect_ok("cond-format gt", "cond-format", "add", "-f", cf,
+              "--sheet", "销售", "--range", "B2:B16", "--op", "gt",
+              "--value", "500")
+    expect_ok("cond-format contains", "cond-format", "add", "-f", cf,
+              "--sheet", "销售", "--range", "B2:B16", "--op", "contains",
+              "--value", "月")
+    expect_ok("cond-format duplicates", "cond-format", "add", "-f", cf,
+              "--sheet", "销售", "--range", "A2:A16", "--op", "duplicates")
+    cws = load_workbook(cf)["销售"]
+    check("cond-format 落盘 2 区域", len(cws.conditional_formatting) == 2, "")
+    expect_ok("cond-format clear --range", "cond-format", "clear", "-f", cf,
+              "--sheet", "销售", "--range", "B2:B16")
+    cws = load_workbook(cf)["销售"]
+    check("cond-format 清除后剩 1", len(cws.conditional_formatting) == 1, "")
+    expect_ok("cond-format clear --all", "cond-format", "clear", "-f", cf,
+              "--sheet", "销售", "--all")
+    cws = load_workbook(cf)["销售"]
+    check("cond-format 全清", len(cws.conditional_formatting) == 0, "")
+    code, out, err = run("cond-format", "clear", "-f", cf)
+    check("cond-format 无 range 报错", code == 2, f"code={code}")
+
+    cmf = wpath("cmt.xlsx")
+    shutil.copy(demo, cmf)
+    out = expect_ok("comment set", "comment", "set", "-f", cmf,
+                    "--sheet", "销售", "--cell", "A2", "--text", "备注测试",
+                    "--author", "tester")
+    c2 = load_workbook(cmf)["销售"]["A2"].comment
+    check("comment 落盘", c2 is not None and c2.text == "备注测试"
+          and c2.author == "tester", str(c2))
+    expect_ok("comment clear", "comment", "clear", "-f", cmf,
+              "--sheet", "销售", "--cell", "A2")
+    check("comment 已清除", load_workbook(cmf)["销售"]["A2"].comment is None, "")
+
+    vf = wpath("val.xlsx")
+    shutil.copy(demo, vf)
+    out = expect_ok("validate add 列表", "validate", "add", "-f", vf,
+                    "--sheet", "销售", "--range", "C2:C16", "--list", "北京,上海")
+    vws = load_workbook(vf)["销售"]
+    check("validate 落盘", out and vws.data_validations.dataValidation
+          and vws.data_validations.dataValidation[0].formula1 == '"北京,上海"',
+          str(out))
+    expect_ok("validate add 区域源", "validate", "add", "-f", vf,
+              "--sheet", "销售", "--range", "D2:D16", "--source", "人员!A1:A3")
+    expect_ok("validate clear", "validate", "clear", "-f", vf,
+              "--sheet", "销售", "--range", "C2:D16")
+    check("validate 已清空", len(load_workbook(vf)["销售"]
+                                 .data_validations.dataValidation) == 0, "")
+
+    # ---------- insert / delete(行/列,合并区预检) ----------
+    od = wpath("io.xlsx")
+    shutil.copy(demo, od)
+    expect_ok("io 先解除底部合并", "merge", "-f", od, "--sheet", "销售",
+              "--range", "A16:B16", "--unmerge")
+    ws_src = load_workbook(od)["销售"]
+    v31 = ws_src["A3"].value
+    expect_ok("insert rows 3x2", "insert", "-f", od, "--sheet", "销售",
+              "--rows", "3", "--count", "2")
+    ows = load_workbook(od)["销售"]
+    check("insert 数据下移", ows["A5"].value == v31,
+          "v31=%r A5=%r dump=%s" % (v31, ows["A5"].value,
+            [[ows.cell(r, c).value for c in range(1, 4)]
+             for r in range(1, 10)]))
+    expect_err("insert 撞合并区拒绝", "layout_conflict", "insert", "-f",
+               demo, "--sheet", "销售", "--rows", "16")
+    expect_ok("delete rows 3-4", "delete", "-f", od, "--sheet", "销售",
+              "--rows", "3-4")
+    ows = load_workbook(od)["销售"]
+    check("delete 数据恢复", ows["A3"].value == v31, str(ows["A3"].value))
+    vc2 = ws_src["C2"].value
+    expect_ok("insert cols B", "insert", "-f", od, "--sheet", "销售",
+              "--cols", "B")
+    ows = load_workbook(od)["销售"]
+    check("insert 列右移", ows["D2"].value == vc2, str(ows["D2"].value))
+    expect_ok("delete cols B", "delete", "-f", od, "--sheet", "销售",
+              "--cols", "B")
+    ows = load_workbook(od)["销售"]
+    check("delete 列恢复", ows["C2"].value == vc2, str(ows["C2"].value))
+    expect_err("delete 行格式错", "bad_args", "delete", "-f", od,
+               "--sheet", "销售", "--rows", "2-x")
+
+    # ---------- replace ----------
+    rf = wpath("rep.xlsx")
+    shutil.copy(demo, rf)
+    expect_ok("replace 前置写文本", "write", "-f", rf, "--sheet", "销售",
+              "--cell", "F1", "--data", '"Hello World ABC"')
+    out = expect_ok("replace 基本", "replace", "-f", rf, "--sheet", "销售",
+                    "--find", "world", "--replace", "X", "--range", "F1:F1")
+    check("replace 大小写不敏感计数", out and out["cells_changed"] == 1
+          and out["occurrences"] == 1, str(out))
+    expect_ok("replace match-case", "replace", "-f", rf, "--sheet", "销售",
+              "--find", "abc", "--replace", "Y", "--range", "F1:F1",
+              "--match-case")
+    out = expect_ok("replace 读取验证", "read", "-f", rf, "--sheet", "销售",
+                    "--range", "F1:F1")
+    check("replace 结果文本", out and out["rows"][0][0] == "Hello X ABC",
+          str(out and out["rows"]))
+    expect_ok("replace regex", "replace", "-f", rf, "--sheet", "销售",
+              "--find", "^Hello", "--replace", "Hi", "--range", "F1:F1",
+              "--regex")
+    out = expect_ok("replace 结果=开头存文本", "replace", "-f", rf,
+                    "--sheet", "销售", "--find", "Hi X", "--replace", "=NOW()",
+                    "--range", "F1:F1")
+    f1c = load_workbook(rf)["销售"]["F1"]
+    check("replace =开头是文本", f1c.value == "=NOW() ABC"
+          and f1c.data_type == "s", f"{f1c.value!r} {f1c.data_type}")
+    expect_ok("replace 公式默认跳过", "replace", "-f", rf, "--sheet", "销售",
+              "--find", "B2", "--replace", "Q9", "--range", "D2:D2")
+    expect_ok("replace --in-formulas", "replace", "-f", rf, "--sheet", "销售",
+              "--find", "B2", "--replace", "Q9", "--range", "D2:D2",
+              "--in-formulas")
+    d2 = load_workbook(rf)["销售"]["D2"]
+    check("replace 公式内替换", d2.value == "=Q9*C2", str(d2.value))
+
     # ======================================================================
     # word 组(显式带组名;word write 增删改查 + 图片/样式元数据)
     # ======================================================================
@@ -398,6 +539,27 @@ def main() -> int:
           str(out and out["paragraphs"]))
     expect_err("word write 需 --create", "no_file", "word", "write",
                "-f", wpath("nope.docx"), "--text", "x")
+
+    # ---------- word replace(模板占位符) ----------
+    wt = wpath("wt.docx")
+    expect_ok("word replace 模板准备", "word", "write", "-f", wt,
+              "--create", "--text", "甲方 ${客户} 于 {日期} 签约")
+    with open(wpath("repl.json"), "w", encoding="utf-8") as fh:
+        json.dump({"${客户}": "测试公司", "{日期}": "2026-05-01"}, fh,
+                  ensure_ascii=False)
+    out = expect_ok("word replace 模板", "word", "replace", "-f", wt,
+                    "--data-file", wpath("repl.json"))
+    check("word replace 计数", out and out["occurrences"] == 2
+          and out["rebuilt_paragraphs"] == 0, str(out))
+    out = expect_ok("word replace 回读", "word", "read", "-f", wt)
+    joined = "".join(p.get("text", "")
+                      for p in (out or {}).get("paragraphs", []))
+    check("word replace 内容", "甲方 测试公司 于 2026-05-01 签约" in joined,
+          str(joined))
+    expect_ok("word replace find 模式", "word", "replace", "-f", wt,
+              "--find", "测试公司", "--replace", "新公司")
+    expect_err("word replace 缺文件", "no_file", "word", "replace", "-f",
+               wpath("nope.docx"), "--find", "a", "--replace", "b")
 
     with open(wpath("bad.json"), "w") as fh:
         fh.write("{not json")
@@ -539,6 +701,37 @@ def main() -> int:
               "--out", noimg_pdf)
     expect_err("pdf images 无图报错", "no_images", "pdf", "images", "-f",
                noimg_pdf, "--out-dir", wpath("pdimgs2"))
+
+    # ---------- pdf search / footer / from-images ----------
+    out = expect_ok("pdf search 命中", "pdf", "search", "-f", pdf_path,
+                    "--find", "办公文档转换样本")
+    check("pdf search 结果", out and out["total"] >= 1
+          and out["matches"][0]["count"] >= 1, str(out))
+    out = expect_ok("pdf search 无命中", "pdf", "search", "-f", pdf_path,
+                    "--find", "绝不存在的词XYZ")
+    check("pdf search 空结果", out and out["total"] == 0, str(out))
+    code, out, err = run("pdf", "search", "-f", pdf_path)
+    check("pdf search 缺 --find", code == 2, f"code={code}")
+    fpdf = wpath("foot.pdf")
+    shutil.copy(pdf_path, fpdf)
+    expect_ok("pdf footer 中文页码", "pdf", "footer", "-f", fpdf,
+              "--text", "第 {page} 页 / 共 {pages} 页")
+    out = expect_ok("pdf footer 后可搜", "pdf", "search", "-f", fpdf,
+                    "--find", "第 1 页")
+    check("pdf footer 文本写入", out and out["total"] >= 1, str(out))
+    expect_ok("pdf footer 指定页", "pdf", "footer", "-f", fpdf,
+              "--text", "机密", "--pages", "1")
+    expect_err("pdf footer 页越界", "bad_args", "pdf", "footer", "-f",
+               fpdf, "--text", "x", "--pages", "99-100")
+    out = expect_ok("pdf from-images", "pdf", "from-images", "--out",
+                    wpath("combo.pdf"), os.path.join(SAMPLES, "logo.png"),
+                    os.path.join(SAMPLES, "logo.png"))
+    check("pdf from-images 页数", out and out["pages"] == 2, str(out))
+    out = expect_ok("pdf from-images info", "pdf", "info", "-f",
+                    wpath("combo.pdf"))
+    check("pdf from-images 可读", out and out["pages"] == 2, str(out))
+    expect_err("pdf from-images 缺图", "no_file", "pdf", "from-images",
+               "--out", wpath("combo2.pdf"), wpath("no.png"))
 
     # ======================================================================
     # convert 跨格式(WPS 引擎部分)

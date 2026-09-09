@@ -24,6 +24,7 @@
   docx -> md
   pdf -> docx
   md -> pdf / docx / html
+  html -> pdf               (直接打印,保留原样式)
 
 说明:
 - --to 可省略,由 --out 后缀推断
@@ -187,6 +188,17 @@ def run(args: argparse.Namespace) -> dict:
             return {"ok": True, "from": args.file, "to": args.out,
                     "engine": "builtin", "warnings": []}
         raise _unsupported(src_ext, dst_ext)
+
+    # ---------------- HTML(直接打印,不跑脚本) -------------
+    if src_ext == "html":
+        if dst_ext != "pdf":
+            raise _unsupported(src_ext, dst_ext)
+        from .mdutil import render_html_to_pdf
+
+        render_html_to_pdf(args.file, args.out)
+        return {"ok": True, "from": args.file, "to": args.out,
+                "engine": "playwright+chrome",
+                "warnings": ["HTML 直接打印:保留原样式;mermaid/动态脚本不会执行"]}
 
     raise _unsupported(src_ext, dst_ext)
 

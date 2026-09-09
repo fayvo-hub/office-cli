@@ -95,6 +95,70 @@ def parse_pages(text: str | None, page_count: int) -> list[int]:
     return result
 
 
+def import_fitz():
+    """静默导入 PyMuPDF(PyMuPDF import 时会向 stdout 打印 deprecation 警告,
+    会污染本 CLI 的 JSON 输出,因此临时屏蔽 fd1/fd2)。
+    """
+    import contextlib
+    import os
+    import sys
+
+    if sys.modules.get("fitz") is not None:
+        return sys.modules["fitz"]
+    with contextlib.redirect_stdout(open(os.devnull, "w", encoding="utf-8")):
+        import fitz  # noqa: F401
+    return sys.modules["fitz"]
+
+
+def _replace_with_retry(tmp: str, path: str, tries: int = 8) -> None:
+    """os.replace 带退避重试:Windows 杀软/索引器对新文件的瞬时锁通常 <1s。"""
+    import time
+    for i in range(tries):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.2 * (i + 1))
+
+
+def save_doc_atomic(path: str, doc, **save_kw) -> None:
+    """PyMuPDF 文档原子保存:先写同目录临时文件再替换。
+
+    PyMuPDF 的 save(stream=文件对象)在本机版本会把文件对象误当 fd,
+    因此统一保存到临时路径后 os.replace。
+    """
+    import tempfile
+
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    name = os.path.basename(path)
+    fd, tmp = tempfile.mkstemp(prefix=".office-pdf-", suffix=name, dir=directory)
+    os.close(fd)
+    os.remove(tmp)
+    try:
+        doc.save(tmp, **save_kw)
+        # Windows 下 fitz 保持源文件句柄,先关闭文档再替换目标文件
+        try:
+            doc.close()
+        except Exception:
+            pass
+        _replace_with_retry(tmp, path)
+    except PermissionError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise CliError("file_busy",
+                       f"无法写入 {path}: 文件正被 PDF 阅读器/杀软占用,请关闭后重试") from None
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise CliError("write_failed", f"写入 {path} 失败: {e}") from e
+
+
 def page_size_mm(page) -> dict:
     """页尺寸:pt 与 mm(1pt = 25.4/72mm);应用 /Rotate 后的视觉方向。"""
     w, h = page.mediabox.width, page.mediabox.height

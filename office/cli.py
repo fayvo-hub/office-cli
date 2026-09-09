@@ -50,11 +50,13 @@ def add_sheet_arg(sp: argparse.ArgumentParser) -> None:
 # 各组内子命令对应的模块名(与文件名一致)
 _GROUP_MODS = {
     "excel": ["list", "read", "write", "sheet", "style", "merge", "chart",
-              "image", "pivot"],
-    "word": ["read", "write"],
+              "image", "pivot", "layout", "cond-format", "comment",
+              "validate", "insert", "delete", "replace"],
+    "word": ["read", "write", "replace"],
     "pdf": ["info", "read", "merge", "split", "rotate", "encrypt", "decrypt",
-            "watermark", "images", "to-image"],
+            "watermark", "images", "to-image", "from-images", "footer", "search"],
     "md": ["to-pdf", "to-docx", "to-html"],
+    "ppt": ["read", "write", "to-pdf"],
 }
 
 

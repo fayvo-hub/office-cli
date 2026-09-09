@@ -85,7 +85,7 @@ def run(args: argparse.Namespace) -> dict:
             n += 1
         out = args.out or args.file
         if os.path.abspath(out) == os.path.abspath(args.file):
-            pdfutil.write_atomic(out, lambda fh, d=doc: d.save(fh))  # 原子覆盖
+            pdfutil.save_doc_atomic(out, doc)  # 原子覆盖
         else:
             doc.save(out)
         return {"ok": True, "file": out, "watermarked_pages": n,

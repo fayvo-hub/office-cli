@@ -288,3 +288,47 @@ def merged_anchor(ws, row: int, col: int) -> str | None:
 
 def sheet_names_snapshot(wb: Workbook) -> list[str]:
     return list(wb.sheetnames)
+
+
+def guard_rowcol_shift(ws, axis: str, at: int, verb: str = "操作") -> None:
+    """openpyxl 插入/删除行列不维护合并区/表格/筛选,凡会被移动/破坏的一律拒绝。
+
+    axis: 'rows' | 'cols';at: 1-based 起点(删除带的起始行/列)。受影响判定:
+    区域在起点及以下(右)即会错位或被破坏。
+    """
+    from .errors import CliError
+
+    import re
+
+    def ref_box(ref: str) -> tuple[int, int, int, int]:
+        left, _, right = ref.partition(":")
+        right = right or left
+        m1 = re.match(r"([A-Z]+)(\d+)", left)
+        m2 = re.match(r"([A-Z]+)(\d+)", right)
+        if not m1 or not m2:
+            raise CliError("internal", f"无法解析区域 {ref}")
+        return (int(m1.group(2)), int(m2.group(2)),
+                col_to_idx(m1.group(1)), col_to_idx(m2.group(1)))
+
+    if axis == "rows":
+        hits = [(str(rng), "合并单元格") for rng in ws.merged_cells.ranges
+                if rng.max_row >= at]
+        hits += [(t.name, "表格对象") for t in ws.tables.values()
+                 if ref_box(t.ref)[1] >= at]
+        if ws.auto_filter.ref is not None and ws.auto_filter.ref.max_row >= at:
+            hits.append((str(ws.auto_filter.ref), "自动筛选区域"))
+    else:
+        hits = [(str(rng), "合并单元格") for rng in ws.merged_cells.ranges
+                if rng.max_col >= at]
+        hits += [(t.name, "表格对象") for t in ws.tables.values()
+                 if ref_box(t.ref)[3] >= at]
+        if ws.auto_filter.ref is not None and ws.auto_filter.ref.max_col >= at:
+            hits.append((str(ws.auto_filter.ref), "自动筛选区域"))
+
+    if hits:
+        kinds = sorted({k for _, k in hits})
+        raise CliError(
+            "layout_conflict",
+            f"{verb}会使已有{kinds}错位(openpyxl 不会自动移动它们);"
+            f"请先 excel merge --unmerge 取消合并 / excel layout --unfilter 取消"
+            f"筛选后重试")
