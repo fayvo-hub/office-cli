@@ -71,7 +71,7 @@ office info
 读输出 JSON:`ok` 必须为 true;`mode` = pip|exe;`missing` 期望为 `[]`(pip 全量)或
 仅 `["playwright"]`(exe 版,此时不要调用 md to-pdf);`engines.active` 为 `"WPS"`/`"LibreOffice"`/`"none"`,
 为 `"none"` 时 .xls/.doc/.ppt 老格式升级、Office→pdf、xlsx 公式重算不可用(提示用户装
-ing. WPS Office 或 LibreOffice;macOS/Linux 推荐 LibreOffice)。
+WPS Office 或 LibreOffice;macOS/Linux 推荐 LibreOffice)。
 引擎选择靠环境变量 `OFFICE_ENGINE=auto|wps|lo|none`(默认 auto: Windows 优先 WPS,其它平台优先 LibreOffice)。
 **若以上步骤均失败,直接告诉用户安装失败原因与第 E 步/手动安装指引,不要反复重试。**
 
