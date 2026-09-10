@@ -92,24 +92,43 @@ def _cell_md(cell) -> str:
     return "<br>".join(x for x in parts if x.strip())
 
 
+def _span_and_cont(tc) -> tuple[int, bool]:
+    """单元格的 (gridSpan 列数, 是否 vMerge continue)。"""
+    span, cont = 1, False
+    tcPr = tc.tcPr
+    if tcPr is not None:
+        gs = tcPr.find(qn("w:gridSpan"))
+        if gs is not None:
+            span = int(gs.get(qn("w:val")) or 1)
+        vm = tcPr.find(qn("w:vMerge"))
+        if vm is not None and (vm.get(qn("w:val")) or "restart") == "continue":
+            cont = True
+    return span, cont
+
+
+def _table_ncols(t: Table) -> int:
+    """表格总列数。正常读 tblGrid;脏文档缺 <w:tblGrid> 时(某些工具生成的
+    docx 会丢)python-docx 抛 InvalidXmlError,此时按各行 w:tc + w:gridSpan 推断,
+    而不是丢掉整张表。"""
+    try:
+        return len(t.columns)
+    except Exception:  # noqa: BLE001  缺 tblGrid 的脏表: 降级推断列数
+        best = 0
+        for row in t.rows:
+            best = max(best, sum(_span_and_cont(tc)[0] for tc in row._tr.tc_lst))
+        return max(best, 1)
+
+
 def _table_md(t: Table) -> str:
     """表格 -> markdown。按 XML 单元格(tc)遍历,展开 gridSpan、跳过 vMerge
     continue 行(避免 python-docx row.cells 把合并文本重复到整列)。"""
     lines: list[str] = []
-    ncols = len(t.columns)   # grid 总列数(=各 tc gridSpan 之和)
+    ncols = _table_ncols(t)   # grid 总列数(=各 tc gridSpan 之和)
     first = True
     for row in t.rows:
         cells: list[str] = []
         for tc in row._tr.tc_lst:
-            tcPr = tc.tcPr
-            span, cont = 1, False
-            if tcPr is not None:
-                gs = tcPr.find(qn("w:gridSpan"))
-                if gs is not None:
-                    span = int(gs.get(qn("w:val")) or 1)
-                vm = tcPr.find(qn("w:vMerge"))
-                if vm is not None and (vm.get(qn("w:val")) or "restart") == "continue":
-                    cont = True
+            span, cont = _span_and_cont(tc)
             if cont:
                 cells.extend([""] * span)   # 纵向合并的后续行: 空格,不重复
             else:

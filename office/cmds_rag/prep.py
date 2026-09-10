@@ -861,6 +861,39 @@ def _clean_pdf_text(text: str) -> str:
     return "\n".join(out)
 
 
+def _norm_ws(s: str) -> str:
+    return " ".join((s or "").split())
+
+
+def _table_row_keys(tables: list[dict]) -> set[str]:
+    """表格里每个逻辑行的文本(单元格空格相连)。用于从页面纯文本里剔除
+    与表格重复的行 —— PDF 页面文本本身已含表格内容,再追加 md 表格会重复一次。"""
+    keys: set[str] = set()
+    for t in tables:
+        for row in t.get("rows_data") or []:
+            key = _norm_ws(" ".join(_cell_text(c) for c in row))
+            if key:
+                keys.add(key)
+    return keys
+
+
+def _drop_table_lines(text: str, tables: list[dict]) -> tuple[str, int]:
+    """删掉页面纯文本里“与表格行内容相同”的行,返回 (新文本, 删除行数)。
+
+    PDF 页面文本天然包含表格里的文字,再追加 md 表格就会重复一遍;这里按
+    表格单元格拼接后的归一化文本做匹配,把重复行从正文里去掉。"""
+    keys = _table_row_keys(tables)
+    if not keys:
+        return text, 0
+    kept, dropped = [], 0
+    for ln in text.splitlines():
+        if ln.strip() and _norm_ws(ln) in keys:
+            dropped += 1
+            continue
+        kept.append(ln)
+    return ("\n".join(kept) if dropped else text), dropped
+
+
 def _prep_pdf(src: str) -> dict:
     from ..cmds_pdf import read as pdf_read  # 复用 cmds_pdf.read 的抽取管线(同进程)
 
@@ -873,12 +906,17 @@ def _prep_pdf(src: str) -> dict:
         text = _clean_pdf_text(pg.get("text") or "")
         if text != (pg.get("text") or ""):
             warn.append(f"第 {pg['index']} 页已去除页脚/页码噪音行")
+        tables = pg.get("tables", [])
+        # 已被表格覆盖的行从正文剔除:否则同一条数据会以“纯文本一行 + 表格一行”出现两次
+        text, dropped = _drop_table_lines(text, tables)
+        if dropped:
+            warn.append(f"第 {pg['index']} 页有 {dropped} 行属于表格内容,已从正文剔除(避免与表格重复)")
         cleaned_pages.append({"index": pg["index"], "text": text,
-                              "tables": pg.get("tables", [])})
+                              "tables": tables})
         md_chunks.append("")
         if text.strip():
             md_chunks.append(text.strip())
-        for t in pg.get("tables", []):
+        for t in tables:
             rows = t.get("rows_data") or []
             if not rows:
                 continue
@@ -936,6 +974,9 @@ def _prep_pptx(src: str) -> dict:
                 lines.append("  " * int(t.get("level") or 0) + f"- {t['text']}")
             else:
                 lines.append(f"- {t}")
+        # 幻灯片标题常与正文首个文本框重复(标题占位符 + 页眉文本框),去掉重复行
+        if title and lines and lines[0].lstrip(" -").strip() == str(title).strip():
+            lines = lines[1:]
         if lines:
             blocks.append({"type": "notes", "title": title,
                            "text": "\n".join(lines), "warnings": []})

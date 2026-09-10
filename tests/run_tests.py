@@ -1264,6 +1264,63 @@ def main() -> int:
     check("rag rtf 内容", out.get("format") == "rtf"
           and "夜班共完成 12 批" in md_rtf, md_rtf[:120])
 
+    # ---------- 与 markitdown 实测对比后修的三处 ----------
+    # ① 缺 <w:tblGrid> 的脏 docx 不再整表跳过(部分系统导出的 docx 会丢该元素)
+    from docx import Document as _Doc
+    _d = _Doc()
+    _d.add_heading("仓储安全台账", level=1)
+    _t = _d.add_table(rows=2, cols=2)
+    _t.cell(0, 0).text, _t.cell(0, 1).text = "库位", "库存"
+    _t.cell(1, 0).text, _t.cell(1, 1).text = "A-01", "120"
+    dirty = wpath("rag_dirty_tbl.docx")
+    _d.save(dirty)
+    import re as _re
+    import zipfile as _zip
+    with _zip.ZipFile(dirty) as _z:
+        _parts = {n: _z.read(n) for n in _z.namelist()}
+    _parts["word/document.xml"] = _re.sub(
+        r"<w:tblGrid\s*/>|<w:tblGrid>.*?</w:tblGrid>", "",
+        _parts["word/document.xml"].decode("utf-8"), flags=_re.S).encode("utf-8")
+    with _zip.ZipFile(dirty, "w", _zip.ZIP_DEFLATED) as _z:
+        for _n, _b in _parts.items():
+            _z.writestr(_n, _b)
+    out = expect_ok("rag prep 脏 docx(缺 tblGrid)", "rag", "prep", "-f", dirty,
+                    "--out-dir", WORK)
+    md_dirty = open(out["md"], encoding="utf-8").read()
+    check("脏 docx 表不丢", "库位" in md_dirty and "A-01" in md_dirty
+          and "损坏的表格" not in md_dirty, md_dirty[:200])
+
+    # ③ pptx 标题占位符与正文首行重复 → 只保留标题,不再重复成要点
+    from pptx import Presentation as _Prs
+    from pptx.util import Inches as _In
+    _prs = _Prs()
+    _sl = _prs.slides.add_slide(_prs.slide_layouts[5])   # Title Only
+    _sl.shapes.title.text = "周会汇报"
+    _tf = _sl.shapes.add_textbox(_In(1), _In(2), _In(6), _In(2)).text_frame
+    _tf.text = "周会汇报"
+    _tf.add_paragraph().text = "本周完成 3 项"
+    dup_pptx = wpath("rag_dup_title.pptx")
+    _prs.save(dup_pptx)
+    out = expect_ok("rag prep pptx 标题重复", "rag", "prep", "-f", dup_pptx,
+                    "--out-dir", WORK)
+    md_pptx = open(out["md"], encoding="utf-8").read()
+    check("pptx 标题不重复成要点", "- 周会汇报" not in md_pptx
+          and "- 本周完成 3 项" in md_pptx, md_pptx[:200])
+
+    # ② PDF 表格内容不再同时以“正文行 + 表格行”出现两次
+    tbl_md = wpath("rag_tbl.md")
+    with open(tbl_md, "w", encoding="utf-8") as fh:
+        fh.write("# 运价表\n\n| 目的港 | 船司 | 价格 |\n| --- | --- | --- |\n"
+                 "| 美西 | ONE | 3700 |\n| 欧洲 | MSC | 4600 |\n")
+    tbl_pdf = wpath("rag_tbl.pdf")
+    expect_ok("md to-pdf 表格样本", "md", "to-pdf", "-f", tbl_md,
+              "--out", tbl_pdf)
+    out = expect_ok("rag prep pdf 表格", "rag", "prep", "-f", tbl_pdf,
+                    "--out-dir", WORK)
+    md_pdf = open(out["md"], encoding="utf-8").read()
+    check("pdf 表格转 md 且不重复", md_pdf.count("3700") == 1
+          and "| 目的港 |" in md_pdf, md_pdf[:400])
+
     # rag prep --recalc: 数组公式等内置求值器算不出的公式靠 WPS 引擎兜底
     arr_x = wpath("rag_arr.xlsx")
     from openpyxl import Workbook as _WB
