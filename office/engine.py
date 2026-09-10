@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-from . import lo, wps
+from . import lo, printer, wps
 from .errors import CliError
 
 _DEFAULT_TIMEOUT = 180
@@ -79,11 +79,16 @@ def available() -> bool:
 
 
 def convert(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
-    """格式转换: 老格式升级(.xls/.doc/.rtf/.ppt → 新格式)或导出 PDF。"""
+    """格式转换: 老格式升级(.xls/.doc/.rtf/.ppt → 新格式)或导出 PDF。
+
+    引擎启动会初始化打印子系统并读取默认打印机, 期间临时隔离到本地虚拟打印机
+    (详见 office/printer.py;默认打印机为网络机时避免连接/卡顿)。
+    """
     n = active()
     if n is None:
         raise CliError("engine_unavailable", _HINT)
-    (wps if n == "wps" else lo).convert(src, dst, timeout)
+    with printer.isolate():
+        (wps if n == "wps" else lo).convert(src, dst, timeout)
 
 
 def recalc(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
@@ -91,7 +96,8 @@ def recalc(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
     n = active()
     if n is None:
         raise CliError("engine_unavailable", _HINT)
-    (wps if n == "wps" else lo).recalc(src, dst, timeout)
+    with printer.isolate():
+        (wps if n == "wps" else lo).recalc(src, dst, timeout)
 
 
 def is_legacy(path: str, ext: str | None = None) -> bool:
@@ -108,4 +114,5 @@ def info() -> dict:
         "wps": wps.available(),
         "libreoffice": lo.available(),
         "libreoffice_path": lo.path(),
+        "printer": printer.info(),
     }

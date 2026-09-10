@@ -22,7 +22,7 @@ def _module_names() -> list[str]:
     # 函数内延迟导入的内部模块 + 动态注册的命令模块
     mods = ["office.wps_worker", "office.convert", "office.info",
             "office.mdutil", "office.docx2md", "office.pdfutil",
-            "office.xlutil", "office.ioplan", "office.engine", "office.lo"]
+            "office.xlutil", "office.ioplan", "office.engine", "office.lo", "office.printer"]
     for f in glob.glob(os.path.join(ROOT, "office", "cmds_*", "*.py")):
         if os.path.basename(f).startswith("_"):
             continue

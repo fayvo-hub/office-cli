@@ -84,6 +84,27 @@ def expect_err(name, errcode, *argv, env=None):
     check(name, got, detail)
 
 
+def run_py(code: str, env: dict | None = None) -> tuple[int, str, str]:
+    """跑一段内联 Python(直接导入 office 包做单元级验证);返回 (码, stdout, stderr)。"""
+    proc = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", code],
+        capture_output=True, text=True, encoding="utf-8", cwd=ROOT, timeout=180,
+        env={**os.environ, **(env or {})},
+    )
+    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+
+
+def py_json(code: str, env: dict | None = None):
+    """跑内联 Python 并把最后一行 stdout 当 JSON 解析(失败返回 None)。"""
+    rc, out, _err = run_py(code, env)
+    if rc != 0 or not out:
+        return None
+    try:
+        return json.loads(out.splitlines()[-1])
+    except json.JSONDecodeError:
+        return None
+
+
 def wpath(name: str) -> str:
     """工作副本路径(测试用,随便改)"""
     return os.path.join(WORK, name)
@@ -1382,6 +1403,45 @@ def engine_checks() -> None:
     check("--engine lo 来源说明",
           any("LibreOffice" in w for w in doc.get("warnings") or []),
           str(doc.get("warnings")))
+
+    # ---------- 默认打印机隔离(引擎启动不该去连网络打印机) ----------
+    code = (
+        "import json\n"
+        "from office import printer as P\n"
+        "orig = P.current_default()\n"
+        "with P.isolate() as iso:\n"
+        "    inside = P.current_default()\n"
+        "after = P.current_default()\n"
+        "print(json.dumps({'orig': orig, 'inside': inside, 'after': after,\n"
+        "                  'net': P.needs_isolation(), 'target': P.isolate_target(),\n"
+        "                  'switched': iso.switched}))\n"
+    )
+    got = py_json(code)
+    check("printer 隔离状态可读", isinstance(got, dict) and "orig" in got, str(got))
+    if isinstance(got, dict):
+        check("printer 退出后默认值还原", got["after"] == got["orig"],
+              f"{got['orig']} -> {got['after']}")
+        if got.get("net") and got.get("target"):
+            check("网络默认打印机被临时切换",
+                  got["switched"] is True and got["inside"] == got["target"], str(got))
+        else:
+            check("非网络默认打印机不动它",
+                  got["switched"] is False and got["inside"] == got["orig"], str(got))
+
+    # 引擎跑完不留副作用(默认打印机与转换前一致)
+    _probe = ("import json; from office import printer as P; "
+              "print(json.dumps(P.current_default()))")
+    before = py_json(_probe)
+    expect_ok("隔离下引擎转换", "convert", "-f", docx,
+              "--out", wpath("iso.pdf"),
+              env={"OFFICE_ENGINE": "lo" if has_lo else "wps"})
+    after = py_json(_probe)
+    check("引擎转换后默认打印机不变", before == after, f"{before} -> {after}")
+
+    out = expect_ok("info 含 printer 段", "info")
+    check("info engines.printer.default 可读",
+          isinstance(((out or {}).get("engines") or {}).get("printer"), dict),
+          str(((out or {}).get("engines") or {}).get("printer")))
 
 
 if __name__ == "__main__":

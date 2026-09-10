@@ -81,6 +81,23 @@ OFFICE_ENGINE=lo office rag prep -f 表.xlsx --recalc   # 用 LibreOffice 重算
 
 版本要求: LibreOffice ≥ 7.3、WPS Office ≥ 2019(Windows)。
 
+### 打印机隔离(Windows)
+
+WPS / LibreOffice / Chrome 启动时都会初始化 Windows 打印子系统并读取“默认打印机”能力;
+若默认打印机是 WSD/IP 网络打印机,系统就会去连它(命令变慢、托盘出现“连接打印机”),
+而 office-cli 从不需要打印。所以引擎调用期间会把默认打印机临时换成本地虚拟打印机
+(`Microsoft Print to PDF`),用完立即恢复原值(实测切换 19ms/恢复 4ms);默认打印机本身
+就是本地端口时不做任何操作。
+
+| 设置 | 说明 |
+|---|---|
+| `OFFICE_PRINTER_ISOLATE=0` | 关闭隔离(默认开启) |
+| `OFFICE_VIRTUAL_PRINTER=名称` | 指定替代用的本地虚拟打印机 |
+| `office info` → `engines.printer` | 看当前默认打印机/端口/是否网络机/替代目标 |
+
+非 Windows 平台不适用(macOS/Linux 不走 winspool)。隔离只影响引擎进程启动那几秒,
+不改变你的日常默认打印机。
+
 ## 通用协议
 
 | 约定 | 说明 |

@@ -24,6 +24,7 @@ from docx.shared import Cm, Pt, RGBColor
 
 from ._atomic import replace_with_retry
 from .errors import CliError
+from . import printer
 
 _MERMAID_RE = re.compile(r"```mermaid[ \t]*\n(.*?)(?:\n```|```)", re.S)
 _MMD_PLACEHOLDER = "@@OFFICE_MERMAID_{}@@"
@@ -226,7 +227,8 @@ def render_html_to_pdf(html_path: str, pdf_path: str) -> dict:
                        "(pip 装 office-cli[mdpdf] 即可)或改用 office md to-docx/html") from None
     mermaid_ok = True
     try:
-        with sync_playwright() as p:
+        # Chrome 启动同样会初始化打印子系统并读默认打印机: 期间隔离到本地虚拟打印机
+        with printer.isolate(), sync_playwright() as p:
             browser_obj = p.chromium.launch(executable_path=browser)
             try:
                 page = browser_obj.new_page()

@@ -73,6 +73,12 @@ office info
 为 `"none"` 时 .xls/.doc/.ppt 老格式升级、Office→pdf、xlsx 公式重算不可用(提示用户装
 WPS Office 或 LibreOffice;macOS/Linux 推荐 LibreOffice)。
 引擎选择靠环境变量 `OFFICE_ENGINE=auto|wps|lo|none`(默认 auto: Windows 优先 WPS,其它平台优先 LibreOffice)。
+
+**打印机隔离(Windows)**:WPS/LibreOffice/Chrome 启动时会初始化打印子系统并读默认打印机,
+若默认是 WSD/IP 网络打印机会去连它(变慢/托盘枱“连接打印机”,而命令根本不需要打印)。
+office-cli 已在引擎调用期间自动把默认打印机临时换成本地虚拟打印机(`Microsoft Print to PDF`)
+并在用完后恢复(几毫秒,默认已是本地端口则不动);排查用 `office info` → `engines.printer`,
+关闭用 `OFFICE_PRINTER_ISOLATE=0`,换替代打印机用 `OFFICE_VIRTUAL_PRINTER="打印机名"`。
 **若以上步骤均失败,直接告诉用户安装失败原因与第 E 步/手动安装指引,不要反复重试。**
 
 ## 通用约定

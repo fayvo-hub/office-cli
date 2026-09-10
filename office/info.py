@@ -29,7 +29,14 @@ DESCRIPTION = """环境自检:输出本机 Python、各依赖库、转换引擎(
     "libreoffice": "C:/Program Files/LibreOffice/program/soffice.exe",  // 跨平台引擎
     "chrome": "C:/.../chrome.exe",    // md->pdf 渲染浏览器
     "edge": "C:/.../msedge.exe",
-    "mermaid_assets": true            // md->pdf 的 mermaid 渲染支持文件
+    "mermaid_assets": true,           // md->pdf 的 mermaid 渲染支持文件
+    "printer": {                      // 默认打印机隔离状态(Windows;引擎启动时防连网络打印机)
+      "isolate_enabled": true,
+      "default": "HP LaserJet ...",
+      "default_port": "WSD-...",      // WSD-/IP_/UNC 等网络端口
+      "default_is_network": true,
+      "virtual_target": "Microsoft Print to PDF"
+    }
   }
 }
 
@@ -78,6 +85,7 @@ def run(args: argparse.Namespace) -> dict:
     from . import engine, lo
 
     engines["libreoffice"] = lo.path()
+    engines["printer"] = engine.info().get("printer")
     if args.fast:
         engines["wps"] = None
         engines["active"] = "LibreOffice" if lo.available() else None
