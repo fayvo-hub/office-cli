@@ -222,6 +222,7 @@ office rag prep -f 表.xlsx --header-rows 2           # 表头行数手动兜底
 office rag prep -f 台账.csv                          # CSV/文本直接摄取(自动编码/分隔符)
 office rag prep -f 汇报.pptx                         # PPT: 每页标题/要点/表格/备注重建(不需 WPS)
 office rag prep -f 表.xlsx --recalc                  # 数组公式/新函数: 先用 WPS 引擎重算再解析
+office rag prep -f 表.xlsx --engine formulas         # 同上但走跨平台 formulas 包(需装 extra)
 ```
 支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(.xls/.doc/.rtf/.ppt 老格式自动升级;>100MB 拒绝)。
 核心能力: 多 sheet **全量**导出(隐藏表剔除);纵向/横向/二维合并块展开;一个 sheet 多张表分块+备注 notes 段;
@@ -229,7 +230,8 @@ office rag prep -f 表.xlsx --recalc                  # 数组公式/新函数: 
 **内置公式求值器**(90+ 函数, 纯标准库: 统计/条件聚合 SUMIFS·MAXIFS/查找 VLOOKUP·XLOOKUP·INDEX·MATCH/
 逻辑 IF·IFS·IFERROR·IS 系列/文本 TEXT·TEXTJOIN·FIND/日期 EOMONTH·WORKDAY·DATEDIF/数学与财务 PMT·NPV,
 含跨表引用与通配符, 无缓存公式直接算), 算不了回退缓存、再无保留原文记 `formula_unresolved`;
-不支持数组表达式(如 `SUMPRODUCT((区域>n)*区域)`)时加 `--recalc` 用本机 WPS 引擎重算拿到真值;
+不支持数组表达式(如 `SUMPRODUCT((区域>n)*区域)`)时加 `--recalc` 用本机 WPS 引擎重算拿到真值,
+或 `--engine formulas` 用 PyPI `formulas` 包(跨平台, 需 `pip install "office-cli[formula]"`);
 百分比/日期按 number_format 渲染;PDF 页脚/页码去噪;
 docx 表格合并单元格展开不重复;ppt 每页→一个 sheet(标题/要点缩进层级/页内表格/备注,
 .ppt 旧格式自动升级,纯 python-pptx 不需 WPS);rtf/.doc 同 docx 管道。产物: `<名>.md`(LLM 友好)+ `<名>.json`

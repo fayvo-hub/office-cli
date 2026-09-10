@@ -1275,6 +1275,32 @@ def main() -> int:
           any("WPS" in w for w in doc.get("warnings") or []),
           str(doc.get("warnings")))
 
+    # rag prep --engine formulas: 可选第三方后端(pip install 'office-cli[formula]')
+    try:
+        import importlib.util as _ilu
+        _has_fm = _ilu.find_spec("formulas") is not None
+    except (ImportError, ValueError):  # noqa: BLE001 未安装则跳过后端用例
+        _has_fm = False
+    if _has_fm:
+        out = expect_ok("rag prep --engine formulas", "rag", "prep", "-f", arr_x,
+                        "--out-dir", WORK, "--engine", "formulas")
+        doc = json.load(open(out["json"], encoding="utf-8"))
+        arr_unres = [u["formula"] for s in doc["sheets"] for b in s["blocks"]
+                     for u in b.get("formula_unresolved") or []]
+        arr_vals = [c for s in doc["sheets"] for b in s["blocks"]
+                    for row in b.get("rows") or [] for c in row]
+        check("rag --engine formulas 算出数组公式", not arr_unres and any(
+            isinstance(v, (int, float)) and abs(float(v) - 100.0) < 1e-6
+            for v in arr_vals), f"{arr_unres} {str(arr_vals)[:160]}")
+        check("rag --engine formulas 有来源说明",
+              any("formulas" in w for w in doc.get("warnings") or []),
+              str(doc.get("warnings")))
+    else:
+        print("SKIP  rag prep --engine formulas(未安装 formulas 包)")
+        expect_err("rag --engine formulas 缺依赖提示", "missing_dependency",
+                   "rag", "prep", "-f", arr_x, "--out-dir", WORK,
+                   "--engine", "formulas")
+
     # ---------- rag 公式求值器(内存直测) ----------
     formula_checks()
 

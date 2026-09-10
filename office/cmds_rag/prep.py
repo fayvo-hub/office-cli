@@ -31,6 +31,7 @@ from .. import ioplan, wps, xlutil
 from .._atomic import replace_with_retry
 from ..cli import add_file_arg
 from ..errors import CliError
+from . import fmengine
 
 NAME = "prep"
 HELP = "RAG 清洗:原生 Office/PDF/CSV → 结构完整 md + JSON(合并展开/公式求值/分块/去噪)"
@@ -44,6 +45,7 @@ DESCRIPTION = """RAG 知识库摄取前的文档清洗与语义抽取。
   office rag prep -f 表.xlsx --header-rows 2      # 手工指定表头行数(auto=自动判定,默认)
   office rag prep -f 台账.csv                     # CSV 直接摄取(自动识别编码/分隔符)
   office rag prep -f 表.xlsx --recalc             # 先用 WPS 引擎重算公式再解析(数组公式/新函数保真兜底)
+  office rag prep -f 表.xlsx --engine formulas    # 同上, 但改用跨平台 PyPI formulas 引擎(需装 extra)
 
 xlsx 语义重建(相对普通转换的关键差异):
 - 多 sheet 全部导出(隐藏 sheet 剔除);合并单元格展开: 纵向向下、横向向右、
@@ -55,7 +57,8 @@ xlsx 语义重建(相对普通转换的关键差异):
 - 公式格: 内置求值器直接计算(90+ 函数: 算术/统计/条件聚合/查找/逻辑/文本/日期/数学/财务,
   跨 sheet 引用与通配符);算不了回退缓存值;再无缓存保留公式原文并记入 formula_unresolved
   (已知不支持: 数组表达式如 SUMPRODUCT((区域>n)*区域)、数组常量 {}、外部链接;
-   这两类可加 --recalc 用本机 WPS 引擎重算拿到真值)
+   这两类可加 --engine formulas(跨平台, 需 pip install "office-cli[formula]")或
+   --engine wps / --recalc(本机 WPS 引擎重算)拿到真值)
 - 数值格按 number_format 渲染: 百分比("24.1%")、日期(ISO)与 Excel 显示一致
 
 pptx 重建:
@@ -98,8 +101,12 @@ def register(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--recursive", action="store_true",
                     help="目录模式递归子目录(默认仅当前目录)")
     sp.add_argument("--recalc", action="store_true",
-                    help="先用 WPS 引擎重算 xlsx 全部公式再解析(需本机 WPS;"
-                         "数组公式等内置求值器算不出的公式走此兜底)")
+                    help="先用 WPS 引擎重算 xlsx 全部公式再解析(等价 --engine wps;需本机 WPS)")
+    sp.add_argument("--engine", choices=["auto", "builtin", "formulas", "wps"],
+                    default="auto",
+                    help="公式求值后端:auto/builtin 内置求值器(默认,零依赖);"
+                         "formulas 第三方包(需 pip install 'office-cli[formula]',"
+                         "能算数组表达式);wps 用本机 WPS 引擎重算(保真度最高)")
 
 
 # ---------------------------------------------------------------------------
@@ -276,11 +283,12 @@ def _row_is_value(grid_row: list) -> bool:
 class _SheetEnv:
     """公式求值器 FormulaEnv 适配: 直接读 openpyxl 工作簿(懒),带公式结果缓存。"""
 
-    def __init__(self, wb, mr_of: dict, visiting: set):
+    def __init__(self, wb, mr_of: dict, visiting: set, ext: dict | None = None):
         self.wb = wb
         self.mr_of = mr_of          # sheet → 逻辑 max_row(已按合并修正)
         self.cache: dict = {}       # (sheet,r,c) → 求值结果
         self.visiting = visiting
+        self.ext = ext              # 外部引擎预计算结果 {(sheet_lower,r,c): 值}
 
     def cell(self, sheet: str | None, row: int, col: int):
         from .formulas import FormulaError, evaluate
@@ -292,6 +300,11 @@ class _SheetEnv:
             return self.cache[key]
         v = ws.cell(row=row, column=col).value
         if isinstance(v, str) and xlutil.is_formula_text(v):
+            if self.ext:
+                got = self.ext.get((title.lower(), row, col))
+                if got is not None:      # 外部引擎(如图表公式/数组表达式)已算出真值
+                    self.cache[key] = got
+                    return got
             if key in self.visiting:
                 raise FormulaError("循环引用")
             self.visiting.add(key)
@@ -619,7 +632,7 @@ def _notes_md_text(block: dict) -> str:
     return block.get("text") or ""
 
 
-def _prep_xlsx(src: str) -> dict:
+def _prep_xlsx(src: str, ext: dict | None = None) -> dict:
     plan = ioplan.excel_plan(src, write=False)
     path = plan.read_path
     wb = xlutil.open_workbook(path)
@@ -645,7 +658,7 @@ def _prep_xlsx(src: str) -> dict:
         for rng in ws.merged_cells.ranges:
             mr = max(mr, rng.max_row)
         mr_of[ws.title] = mr
-    env = _SheetEnv(wb, mr_of, set())
+    env = _SheetEnv(wb, mr_of, set(), ext)
 
     for ws in wb.worksheets:
         swarn: list[str] = []
@@ -1013,25 +1026,39 @@ def run(args: argparse.Namespace) -> dict:
                                f"rag prep 暂不支持 '{ext}',仅支持: "
                                f"{', '.join(sorted(_SUPPORTED))}")
             if ext in (".xlsx", ".xlsm", ".xls"):
+                engine = "wps" if args.recalc else args.engine
+                if engine == "auto":
+                    engine = "builtin"
                 src_x = f
-                recalc_dir = None
-                if args.recalc:
-                    recalc_dir = tempfile.mkdtemp(prefix="office-rag-recalc-")
+                ext_map = None
+                tmp_dir = None
+                if engine == "wps":
+                    tmp_dir = tempfile.mkdtemp(prefix="office-rag-recalc-")
                     recalc_src = f
                     if ext == ".xls":      # 老格式先升级再重算
-                        up = os.path.join(recalc_dir, stem + ".xlsx")
+                        up = os.path.join(tmp_dir, stem + ".xlsx")
                         wps.convert(f, up)
                         recalc_src = up
-                    src_x = os.path.join(recalc_dir, stem + "_recalc.xlsx")
+                    src_x = os.path.join(tmp_dir, stem + "_recalc.xlsx")
                     wps.recalc(recalc_src, src_x)
+                elif engine == "formulas":
+                    if ext == ".xls":      # formulas 只认 xlsx,老格式先用 WPS 升级
+                        tmp_dir = tempfile.mkdtemp(prefix="office-rag-xls2xlsx-")
+                        up = os.path.join(tmp_dir, stem + ".xlsx")
+                        wps.convert(f, up)
+                        src_x = up
+                    ext_map = fmengine.load(src_x)
                 try:
-                    r = _prep_xlsx(src_x)
+                    r = _prep_xlsx(src_x, ext_map)
                 finally:
-                    if recalc_dir:
-                        shutil.rmtree(recalc_dir, ignore_errors=True)
-                if args.recalc:
+                    if tmp_dir:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                if engine == "wps":
                     r.setdefault("warnings", []).insert(
                         0, "公式已由 WPS 引擎重算(数据来源: WPS 计算结果)")
+                elif engine == "formulas":
+                    r.setdefault("warnings", []).insert(
+                        0, "公式由 formulas 引擎计算(PyPI formulas 包)")
             elif ext == ".csv":
                 r = _prep_csv(f)
             elif ext == ".txt":

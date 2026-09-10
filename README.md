@@ -43,6 +43,7 @@ GitHub Releases 提供免安装单文件版(约 120MB):下载 `office.exe` 后�
 
 ```bash
 pip install -e ".[mdpdf,wps,images]"   # mdpdf=md 渲染;wps=WPS COM;images=图片
+pip install -e ".[formula]"            # 可选公式引擎(PyPI formulas, 跨平台)
 python scripts/build_exe.py             # 重新打包单文件 exe(需要 pip install pyinstaller)
 ```
 
@@ -234,6 +235,8 @@ office rag prep -f 文档目录/ --out-dir clean/ --recursive
 office rag prep -f 表.xlsx --header-rows 2
 # 公式保真兜底: 数组公式等内置求值器算不出的, 用 WPS 引擎重算后解析(需本机 WPS)
 office rag prep -f 表.xlsx --recalc
+# 或改用跨平台 PyPI formulas 引擎(需 pip install "office-cli[formula]")
+office rag prep -f 表.xlsx --engine formulas
 ```
 
 支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(目录批量;.xls/.doc/.rtf/.ppt 老格式自动经 WPS 升级)。
@@ -254,7 +257,9 @@ office rag prep -f 表.xlsx --recalc
   数学与财务 SQRT/POWER/LOG/INT/MOD/ROUND 系列/CEILING/FLOOR/TRUNC/SUMSQ/PRODUCT/PMT/FV/PV/NPV/IRR;
   算不了回退缓存值, 再无缓存保留原文并记入 `formula_unresolved`
 - **公式保真三级**: ① 文件自带缓存值(最快) → ② 内置求值器(零依赖, 常见公式全覆盖) →
-  ③ `--recalc` 用本机 WPS/Excel 引擎重算(100% 保真: 数组表达式、新函数、外部引用都能算, 每个文件数秒)
+  ③ 兜底引擎二选一: `--engine formulas`(PyPI `formulas` 包, 跨平台、数组表达式也能算,
+  需 `pip install "office-cli[formula]"`;每个文件加载 1~10s)或 `--engine wps`/`--recalc`
+  (本机 WPS 引擎重算, 保真度最高、Windows 专用)
 - **数值按 number_format 渲染**: 百分比(13%→"13%")、日期 ISO(2024-01-12),与 Excel 显示一致
 - CSV 自动识别编码(utf-8-sig/utf-8/gb18030)与分隔符;txt 输出为段落 notes
 - **PPTX 结构重建**(纯 python-pptx,无需 WPS): 每页一个 sheet(「第 N 页 标题」),
