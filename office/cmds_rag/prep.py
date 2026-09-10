@@ -6,7 +6,10 @@
   多表分块(一个 sheet 多张表/备注行)、内置公式求值器(无缓存公式直接算,
   算不了回退缓存值,再无则保留原文记 unresolved)、百分比/日期按格式渲染、
   隐藏 sheet 剔除、纯文本 sheet 输出为 notes 块
-- docx/doc: 内置 docx→md 引擎(标题层级/表格保留),输出 md + 统计 JSON
+- docx/doc/rtf: 内置 docx→md 引擎(标题层级/表格保留),rtf 经 WPS 升级为 docx 后同管道,
+  输出 md + 统计 JSON
+- pptx/ppt: 每页标题/要点/表格/备注 → sheets[].blocks[](纯 python-pptx,无需 WPS;
+  .ppt 旧格式经 WPS 升级)
 - pdf: 逐页文本 + 表格抽取(复用 pdf read),页脚/页码去噪,输出 md + 结构化 JSON
 - 目录模式: 批量处理并输出 qa.json 质检汇总(坏文件/公式未解析等上库前暴露)
 
@@ -34,8 +37,8 @@ DESCRIPTION = """RAG 知识库摄取前的文档清洗与语义抽取。
 用法示例:
   office rag prep -f 报表.xlsx                    # 单文件,输出到同目录 <名>.md + <名>.json
   office rag prep -f 报表.xls --out-dir clean/    # 老格式自动升级后处理
-  office rag prep -f 文档目录/ --out-dir clean/    # 批量目录(xlsx/xlsm/xls/csv/docx/doc/pdf/txt),
-                                                   #   另写 clean/qa.json 质检汇总
+  office rag prep -f 文档目录/ --out-dir clean/    # 批量目录(xlsx/xlsm/xls/csv/docx/doc/rtf/
+                                                   #   pptx/ppt/pdf/txt),另写 clean/qa.json 质检汇总
   office rag prep -f 表.xlsx --header-rows 2      # 手工指定表头行数(auto=自动判定,默认)
   office rag prep -f 台账.csv                     # CSV 直接摄取(自动识别编码/分隔符)
 
@@ -50,6 +53,11 @@ xlsx 语义重建(相对普通转换的关键差异):
   再无缓存保留公式原文并记入 formula_unresolved
 - 数值格按 number_format 渲染: 百分比("24.1%")、日期(ISO)与 Excel 显示一致
 
+pptx 重建:
+- 每页一个 sheet("第 N 页 标题"):要点为 notes 块(保留层级),页内表格为 table 块
+  (首行为表头),演讲者备注附入 notes
+- 图片/图表只统计不计入文本;.ppt 旧格式自动经 WPS 升级后读取
+
 输出(每个输入文件):
 - <名>.md   : LLM/分块友好(Markdown 表格、层级标题)
 - <名>.json : 结构化(sheets[].blocks[]: table/notes + 行号 + 质检 warnings)
@@ -59,7 +67,8 @@ stdout(单文件): {file, ok, md, json, format, sheets, tables, rows, warnings} 
 结构见 .json 文件。目录模式 stdout: {total, succeeded, failed, warnings_total, qa}。
 """
 
-_SUPPORTED = {".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".doc", ".pdf", ".txt"}
+_SUPPORTED = {".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".doc", ".rtf",
+              ".pptx", ".ppt", ".pdf", ".txt"}
 _HEADER_AUTO_LIMIT = 4          # 自动判定时表头行数上限(超过视为无表头/全数据)
 _TITLE_COVER_RATIO = 0.6        # 顶部单值合并块覆盖 ≥ 该比例列宽 → 标题行
 _MAX_UNRESOLVED = 10            # formula_unresolved 单块最多记录条数
@@ -863,12 +872,73 @@ def _prep_pdf(src: str) -> dict:
             "warnings": warn + res.get("warnings", [])}
 
 
-def _prep_docx(src: str, md_path: str) -> dict:
+def _prep_docx(src: str, md_path: str, fmt: str = "docx") -> dict:
     from .. import docx2md
 
     plan = ioplan.word_plan(src, write=False)
     stat = docx2md.docx_to_md(plan.read_path, md_path)
-    return {"format": "docx", "md_path": md_path, "stats": stat, "warnings": []}
+    warnings = []
+    if plan.upgraded_from:
+        warnings.append(f"{src} 为 {fmt} 格式,已用 WPS 自动升级后读取(原文件未改动)")
+    return {"format": fmt, "md_path": md_path, "stats": stat,
+            "warnings": warnings}
+
+
+def _prep_pptx(src: str) -> dict:
+    """pptx(.ppt 自动升级)→ md/sheets:每页一个 sheet,要点 notes、表格 table 块。"""
+    plan = ioplan.ppt_plan(src, write=False)
+    try:
+        from pptx import Presentation
+    except ImportError:  # pragma: no cover
+        raise CliError("need_dep",
+                       "rag prep 处理 PPT 需要 python-pptx: pip install python-pptx") from None
+    try:
+        prs = Presentation(plan.read_path)
+    except Exception as e:
+        raise CliError("cannot_open", f"无法打开 {src}: {e}") from e
+
+    from ..cmds_ppt.read import slides_of
+
+    warnings: list[str] = []
+    if plan.upgraded_from:
+        warnings.append(f"{src} 为旧版 .ppt,已自动升级读取(原文件未改动)")
+    sheets = []
+    for s in slides_of(prs):
+        title = s.get("title")
+        name = f"第 {s['index']} 页" + (f" {title}" if title else "")
+        blocks: list[dict] = []
+        lines = []
+        for t in s.get("texts") or []:
+            if isinstance(t, dict):
+                lines.append("  " * int(t.get("level") or 0) + f"- {t['text']}")
+            else:
+                lines.append(f"- {t}")
+        if lines:
+            blocks.append({"type": "notes", "title": title,
+                           "text": "\n".join(lines), "warnings": []})
+        for tab in s.get("tables") or []:
+            rows = [[_cell_text(c) for c in r] for r in tab]
+            rows = [r for r in rows if any((c or "").strip() for c in r)]
+            if not rows:
+                continue
+            width = max(len(r) for r in rows)
+            head = list(rows[0]) + [None] * (width - len(rows[0]))
+            cols = [(head[i] or "").strip() or f"列 {i + 1}" for i in range(width)]
+            body = [list(r) + [None] * (width - len(r)) for r in rows[1:]]
+            blocks.append({"type": "table", "title": None, "subtitle": None,
+                           "columns": cols, "headers": [], "rows": body,
+                           "row_numbers": list(range(2, len(body) + 2)),
+                           "formula_unresolved": [], "warnings": []})
+        if s.get("notes"):
+            blocks.append({"type": "notes", "title": "备注",
+                           "text": s["notes"], "warnings": []})
+        if not blocks:
+            blocks.append({"type": "notes", "title": None, "text": "(本页无文本内容)",
+                           "warnings": []})
+        sheets.append({"name": name, "blocks": blocks, "warnings": []})
+    doc_title = os.path.splitext(os.path.basename(src))[0]
+    return {"format": "pptx", "sheets": sheets, "warnings": warnings,
+            "md": _render_xlsx_md(doc_title, sheets)}
 
 
 # ---------------------------------------------------------------------------
@@ -942,7 +1012,13 @@ def run(args: argparse.Namespace) -> dict:
                 r = _prep_txt(f)
             elif ext == ".pdf":
                 r = _prep_pdf(f)
-            else:  # .docx / .doc
+            elif ext in (".pptx", ".ppt"):
+                r = _prep_pptx(f)
+            elif ext == ".doc":
+                r = _prep_docx(f, md_path, fmt="doc")
+            elif ext == ".rtf":
+                r = _prep_docx(f, md_path, fmt="rtf")
+            else:  # .docx
                 r = _prep_docx(f, md_path)
             if "md" in r:  # xlsx/csv/txt/pdf 的 md 由本命令落地; docx 由 docx2md 落地
                 _atomic_write(md_path, r.pop("md"))

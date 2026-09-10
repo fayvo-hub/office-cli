@@ -234,7 +234,7 @@ office rag prep -f 文档目录/ --out-dir clean/ --recursive
 office rag prep -f 表.xlsx --header-rows 2
 ```
 
-支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.pdf/.txt(目录批量;.xls/.doc 老格式自动升级)。
+支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(目录批量;.xls/.doc/.rtf/.ppt 老格式自动经 WPS 升级)。
 与普通转换的关键差异(xlsx 语义重建):
 
 - **多 sheet 全量导出**(隐藏 sheet/空表跳过并说明),不做静默截断
@@ -246,6 +246,9 @@ office rag prep -f 表.xlsx --header-rows 2
   算不了回退缓存值,再无缓存保留原文并记入 `formula_unresolved`
 - **数值按 number_format 渲染**: 百分比(13%→"13%")、日期 ISO(2024-01-12),与 Excel 显示一致
 - CSV 自动识别编码(utf-8-sig/utf-8/gb18030)与分隔符;txt 输出为段落 notes
+- **PPTX 结构重建**(纯 python-pptx,无需 WPS): 每页一个 sheet(「第 N 页 标题」),
+  标题/要点保留缩进层级,页内表格→table 块,演讲者备注单独列出;.ppt 旧格式自动升级
+- **RTF/DOC 同 docx 管道**: WPS 升级后走标题层级/表格保留逻辑,原文件不改动
 - **去噪**: PDF 页脚/页码整行去除(含 ⻚ 兼容字符),docx 标题层级保留、表格合并单元格展开不重复
 - 目录模式 `qa.json` 汇总每个文件的行数/表数/公式未解析/告警/大小/耗时;单文件失败不中断批量
 

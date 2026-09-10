@@ -69,6 +69,27 @@ def run(args: argparse.Namespace) -> dict:
         wanted = range(args.slide - 1, args.slide)
 
     saved: list[str] = []
+    slides_out = slides_of(prs, wanted)
+
+    if args.save_images:
+        _export_images(prs, args.save_images, saved)
+
+    _up = {"upgraded_from": plan.upgraded_from} if plan.upgraded_from else {}
+    return {"ok": True, "file": args.file, **_up,
+            "slides_total": total, "pages": len(slides_out),
+            "slides": slides_out,
+            **({"images_saved": saved} if args.save_images else {}),
+            "warnings": warnings}
+
+
+def slides_of(prs, wanted=None) -> list[dict]:
+    """演示文稿 → 每页结构列表(rag prep 与 ppt read 共用)。
+
+    返回 [{index, layout, title, texts, tables, pictures, charts, notes}];
+    wanted 传 range/可迭代时只取对应 0-based 页。
+    """
+    if wanted is None:
+        wanted = range(len(prs.slides))
     slides_out = []
     for idx in wanted:
         slide = prs.slides[idx]
@@ -114,16 +135,7 @@ def run(args: argparse.Namespace) -> dict:
             "charts": charts,
             "notes": notes,
         })
-
-    if args.save_images:
-        _export_images(prs, args.save_images, saved)
-
-    _up = {"upgraded_from": plan.upgraded_from} if plan.upgraded_from else {}
-    return {"ok": True, "file": args.file, **_up,
-            "slides_total": total, "pages": len(slides_out),
-            "slides": slides_out,
-            **({"images_saved": saved} if args.save_images else {}),
-            "warnings": warnings}
+    return slides_out
 
 
 # ---------------------------------------------------------------------------

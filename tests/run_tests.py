@@ -1102,6 +1102,35 @@ def main() -> int:
     md_docx = open(out["md"], encoding="utf-8").read()
     check("rag docx 标题表保留", out and out["md"].startswith(WORK)
           and ("# " in md_docx or "| " in md_docx), str(out))
+    # pptx: 每页 → sheet,要点 notes、表格 table(纯 python-pptx,不依赖 WPS)
+    out = expect_ok("rag prep pptx", "rag", "prep", "-f", sample_pptx,
+                    "--out-dir", WORK)
+    with open(out["json"], encoding="utf-8") as fh:
+        doc = json.load(fh)
+    psh = doc.get("sheets") or []
+    ptexts = [b.get("text") for s in psh for b in s.get("blocks", [])
+              if b.get("type") == "notes"]
+    ptabs = [b for s in psh for b in s.get("blocks", [])
+             if b.get("type") == "table"]
+    check("rag pptx 页/要点/表", doc.get("format") == "pptx" and len(psh) >= 4
+          and any("需求评审完成" in (t or "") for t in ptexts)
+          and ptabs and ptabs[0]["columns"][:2] == ["指标", "Q1"],
+          str(doc)[:300])
+    check("rag pptx md 层级", "## 第" in open(out["md"], encoding="utf-8").read())
+    # rtf: WPS 升级为 docx 后同 docx 管道(手写最小 rtf,不依赖外部生成器)
+    rtfp = wpath("rag_note.rtf")
+    with open(rtfp, "w", encoding="ascii") as fh:
+        body = "".join("\\u%d?" % ord(c) if ord(c) > 127 else c
+                        for c in "交接班说明")
+        body2 = "".join("\\u%d?" % ord(c) if ord(c) > 127 else c
+                         for c in "夜班共完成 12 批,全部合格。")
+        fh.write("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil\\fcharset134 SimSun;}}"
+                 "\\f0\\fs24 " + body + "\\par\n" + body2 + "\\par\n}")
+    out = expect_ok("rag prep rtf", "rag", "prep", "-f", rtfp,
+                    "--out-dir", WORK)
+    md_rtf = open(out["md"], encoding="utf-8").read()
+    check("rag rtf 内容", out.get("format") == "rtf"
+          and "夜班共完成 12 批" in md_rtf, md_rtf[:120])
 
     # ---------- rag 公式求值器(内存直测) ----------
     formula_checks()

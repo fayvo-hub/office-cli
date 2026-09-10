@@ -78,6 +78,7 @@ def convert(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
     op = {
         (".xls", ".xlsx"): "xls_to_xlsx",
         (".doc", ".docx"): "doc_to_docx",
+        (".rtf", ".docx"): "rtf_to_docx",
         (".docx", ".pdf"): "docx_to_pdf",
         (".doc", ".pdf"): "doc_to_pdf",
         (".ppt", ".pptx"): "ppt_to_pptx",
@@ -88,7 +89,7 @@ def convert(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
         raise CliError(
             "unsupported",
             f"WPS 转换不支持 {s_ext} -> {d_ext};"
-            f"支持: .xls->.xlsx、.doc->.docx、.doc/.docx->.pdf、"
+            f"支持: .xls->.xlsx、.doc/.rtf->.docx、.doc/.docx->.pdf、"
             f".ppt->.pptx、.pptx/.ppt->.pdf",
         )
     if not os.path.exists(src):

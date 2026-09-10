@@ -65,6 +65,20 @@ def doc_to_docx(src: str, dst: str) -> None:
         _quit(app)
 
 
+def rtf_to_docx(src: str, dst: str) -> None:
+    """.rtf 富文本 -> .docx(与 .doc 同走 KWPS,只读打开)。"""
+    app = _app("KWPS.Application")
+    doc = None
+    try:
+        doc = app.Documents.Open(os.path.abspath(src), ReadOnly=True)
+        # 16 = wdFormatXMLDocument (.docx)
+        doc.SaveAs2(os.path.abspath(dst), FileFormat=16)
+        doc.Close(False)
+        doc = None
+    finally:
+        _quit(app)
+
+
 def docx_to_pdf(src: str, dst: str) -> None:
     app = _app("KWPS.Application")
     doc = None
@@ -149,6 +163,7 @@ def _ppt_save_pdf(src: str, dst: str) -> None:
 _OPS = {
     "xls_to_xlsx": xls_to_xlsx,
     "doc_to_docx": doc_to_docx,
+    "rtf_to_docx": rtf_to_docx,
     "docx_to_pdf": docx_to_pdf,
     "doc_to_pdf": doc_to_pdf,
     "ppt_to_pptx": ppt_to_pptx,

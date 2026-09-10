@@ -1,6 +1,6 @@
-"""word read — 读取 Word 文档(.docx/.doc)结构与内容。
+"""word read — 读取 Word 文档(.docx/.doc/.rtf)结构与内容。
 
-- 旧版 .doc 自动经 WPS 升级后读取(原文件不动)
+- 旧版 .doc 与 .rtf 自动经 WPS 升级后读取(原文件不动)
 - 输出段落(含样式/标题层级)、表格、图片清单、字数统计
 - 公式域、批注等高级对象不支持(python-docx 能力边界)
 """
@@ -17,7 +17,7 @@ from ..errors import CliError
 
 NAME = "read"
 HELP = "读取 Word 文档:段落(含样式层级)/表格/图片/统计"
-DESCRIPTION = """读取 Word 文档(.docx/.doc),输出结构化 JSON。
+DESCRIPTION = """读取 Word 文档(.docx/.doc/.rtf),输出结构化 JSON。
 
 输出 JSON:
 {
@@ -38,12 +38,12 @@ DESCRIPTION = """读取 Word 文档(.docx/.doc),输出结构化 JSON。
 - 表格单元格取全部文本;合并单元格在 docx 中重复出现是正常现象
 - 大文档可用 --limit 截断段落数(默认 500;0 = 不限)
 - 图片默认只列清单;加 --save-images DIR 可导出全部图片
-- 旧版 .doc 需要本机 WPS Office 自动升级
+- 旧版 .doc 与 .rtf 需要本机 WPS Office 自动升级
 """
 
 
 def register(sp: argparse.ArgumentParser) -> None:
-    add_file_arg(sp, help_text="Word 文件路径(.docx;旧版 .doc 自动升级)")
+    add_file_arg(sp, help_text="Word 文件路径(.docx;旧版 .doc/.rtf 自动升级)")
     sp.add_argument("--limit", type=int, default=500, metavar="N",
                     help="最多输出段落数(默认 500;0 不限制)")
     sp.add_argument("--tables", action="store_true", default=True,
@@ -70,7 +70,9 @@ def run(args: argparse.Namespace) -> dict:
 
     warnings: list[str] = []
     if plan.upgraded_from:
-        warnings.append(f"{args.file} 为旧版 .doc,已由 WPS 自动升级后读取(原文件未改动)")
+        _ext = os.path.splitext(args.file)[1].lower()
+        _label = "旧版 .doc" if _ext == ".doc" else f" {_ext} 格式"
+        warnings.append(f"{args.file} 为{_label},已由 WPS 自动升级后读取(原文件未改动)")
 
     limit = args.limit if args.limit and args.limit > 0 else None
     paragraphs = []

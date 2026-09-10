@@ -1,8 +1,8 @@
-"""输入/输出路径规划:旧版 .xls/.doc 自动升级为 .xlsx/.docx 后再操作。
+"""输入/输出路径规划:旧版 .xls/.doc/.ppt 与 .rtf 自动升级为 .xlsx/.docx/.pptx 后再操作。
 
 规则(对用户透明):
 - .xlsx/.docx 等新格式:原地读写
-- .xls/.doc 老格式:先用本机 WPS Office 无损升级到临时新格式文件供读取;
+- .xls/.doc/.ppt/.rtf 老/异格式:先用本机 WPS Office 无损升级到临时新格式文件供读取;
   写操作的结果保存为同目录同名的新格式文件(如 报表.xls -> 报表.xlsx),
   原老格式文件一律不动(可随时用原文件重新生成)。
 """
@@ -44,13 +44,17 @@ def excel_plan(path: str, *, write: bool = True) -> IoPlan:
 
 
 def word_plan(path: str, *, write: bool = True) -> IoPlan:
-    """Word 文件计划:.doc 老格式 -> 升级 .docx。"""
+    """Word 文件计划:.doc/.rtf 老格式 -> 升级 .docx。"""
     ext = os.path.splitext(path)[1].lower()
-    if ext != ".doc":
-        return IoPlan(path, path if write else None)
-    tmp = _upgrade(path, ".doc", ".docx", kind="doc")
-    final = os.path.splitext(path)[0] + ".docx" if write else None
-    return IoPlan(tmp, final, path)
+    if ext == ".doc":
+        tmp = _upgrade(path, ".doc", ".docx", kind="doc")
+        final = os.path.splitext(path)[0] + ".docx" if write else None
+        return IoPlan(tmp, final, path)
+    if ext == ".rtf":
+        tmp = _upgrade(path, ".rtf", ".docx", kind="rtf")
+        final = os.path.splitext(path)[0] + ".docx" if write else None
+        return IoPlan(tmp, final, path)
+    return IoPlan(path, path if write else None)
 
 
 def ppt_plan(path: str, *, write: bool = True) -> IoPlan:
