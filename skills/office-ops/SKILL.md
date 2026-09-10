@@ -54,7 +54,8 @@ powershell -Command "Invoke-WebRequest -Uri https://github.com/fayvo-hub/office-
 :: 之后用完整路径调用,或把 %LOCALAPPDATA%\office-cli 加入 PATH
 %LOCALAPPDATA%\office-cli\office.exe info
 ```
-exe 版限制:md→pdf 不可用(缺 playwright,报错会提示装完整版);WPS 老格式升级/排版导出需要本机装 WPS Office。
+exe 版限制:md→pdf 不可用(缺 playwright,报错会提示装完整版);老格式升级/排版导出需要本机装
+WPS Office 或 LibreOffice(免配置,PATH/注册表自动探测)。
 
 **E. 连 Python 都没有、也不想用 exe** → 先引导装 Python 再重试:
 ```cmd
@@ -68,14 +69,16 @@ winget install -e --id Python.Python.3.13
 office info
 ```
 读输出 JSON:`ok` 必须为 true;`mode` = pip|exe;`missing` 期望为 `[]`(pip 全量)或
-仅 `["playwright"]`(exe 版,此时不要调用 md to-pdf);`engines.wps` 为 false 时
-.xls/.doc 老格式与 docx→pdf 不可用(需装 WPS Office)。
+仅 `["playwright"]`(exe 版,此时不要调用 md to-pdf);`engines.active` 为 `"WPS"`/`"LibreOffice"`/`"none"`,
+为 `"none"` 时 .xls/.doc/.ppt 老格式升级、Office→pdf、xlsx 公式重算不可用(提示用户装
+ing. WPS Office 或 LibreOffice;macOS/Linux 推荐 LibreOffice)。
+引擎选择靠环境变量 `OFFICE_ENGINE=auto|wps|lo|none`(默认 auto: Windows 优先 WPS,其它平台优先 LibreOffice)。
 **若以上步骤均失败,直接告诉用户安装失败原因与第 E 步/手动安装指引,不要反复重试。**
 
 ## 通用约定
 
 - 写操作默认**原地改写**原文件;结果 JSON 里 `file` 指向实际写到的文件。
-- 老格式:`.xls`/`.doc` 输入会自动经 WPS 升级为 `.xlsx`/`.docx` 再操作,原文件不动;升级会出现在 `warnings`。
+- 老格式:`.xls`/`.doc`/`.rtf`/`.ppt` 输入会自动经办公引擎(WPS 或 LibreOffice)升级为 `.xlsx`/`.docx`/`.pptx` 再操作,原文件不动;升级会出现在 `warnings`。
 - 编码/分隔符:CSV 读取自动识别(utf-8-sig/utf-8/gb18030 与 `,` `;` `\t` `|`);xlsx→csv 带 BOM(Excel 可直接打开)。
 - 复杂 JSON 数据一律写临时文件再 `--data-file`,避免 Shell 转义。
 
@@ -150,7 +153,7 @@ blocks JSON(顶层 `{"blocks": [...]}`,块类型缺省 p):
 块说明:h=标题(level 1-9);p 可 `text` 或 `runs[]`(逐段富文本:bold/italic/code 等宽/color 6位hex/size pt,也可块级统一设);code=等宽灰底;quote=斜体+左缩进;table=二维 rows、网格边框、**首行默认加粗**(表头,加 `--no-header` 取消);img=`path`+`width`(单位厘米,默认 15);pagebreak=分页。
 word replace 支持正文/表格/页眉页脚,优先 run 级精确替换(保留样式),跨 run 文本自动合并重建该段(样式取首 run);输出 `occurrences`/`rebuilt_paragraphs`。
 
-### PPT(组前缀 ppt,读写 python-pptx,to-pdf 走 WPS)
+### PPT(组前缀 ppt,读写 python-pptx,to-pdf 走办公引擎)
 ```bash
 office ppt read -f 演示.pptx                      # 逐页: title/texts(带 level 层级)/tables(二维数组)/pictures 数/notes; --slide N 单页; --save-images DIR 导出图片
 office ppt write -f 演示.pptx --create --data-file slides.json   # 存在则末尾追加
@@ -166,7 +169,7 @@ slides JSON(顶层 `{"slides": [...]}`):
    "picture": {"path": "logo.png", "left_in": 1, "top_in": 5, "width_in": 3}}
 ]}
 ```
-要点:layout 只认 `title`/`title-content`/`blank`(缺省自动: 含要点→title-content, 仅标题→title);含 table/picture/texts 的页自动落 blank(忽略 layout 并警告);尺寸单位英寸;`.ppt` 老格式自动经 WPS 升级后读写;`ppt to-pdf -f 演示.pptx --out 演示.pdf` 需 WPS。
+要点:layout 只认 `title`/`title-content`/`blank`(缺省自动: 含要点→title-content, 仅标题→title);含 table/picture/texts 的页自动落 blank(忽略 layout 并警告);尺寸单位英寸;`.ppt` 老格式自动经办公引擎升级后读写;`ppt to-pdf -f 演示.pptx --out 演示.pdf` 需 WPS 或 LibreOffice。
 
 ### PDF(组前缀 pdf)
 ```bash
@@ -204,8 +207,8 @@ office convert -f 表.csv --out 表.xlsx            # csv→xlsx
 office convert -f 表.xlsx --to json --out 表.json # json 互转同理; 所有 xlsx 源转换都支持 --sheet/--range/--cached
 office convert -f 表.xlsx --out 表.md            # 导出 Markdown 表格(首行作表头)
 office convert -f 表.xlsx --out 表.txt           # 导出 TSV 制表符文本(信息无损)
-office convert -f 旧.xls --out 新.xlsx            # 老格式升级(WPS,原文件不动)
-office convert -f 报告.docx --out 报告.pdf        # Word→PDF 走 WPS 保真排版(--engine 可选,默认 wps)
+office convert -f 旧.xls --out 新.xlsx            # 老格式升级(办公引擎,原文件不动)
+office convert -f 报告.docx --out 报告.pdf        # Word→PDF 保真排版(WPS 或 LibreOffice)
 office convert -f 文档.pdf --to docx --out 文档.docx   # pdf2docx 版面还原
 office convert -f 报告.docx --to md --out 报告.md  # docx→md 结构近似
 office convert -f 说明.md --out 说明.pdf           # md→pdf 默认样式(精细控制用 md to-pdf);也可 --css 文件路径定制
@@ -220,8 +223,9 @@ office rag prep -f 报表.xlsx --out-dir clean/        # → clean/报表.md + �
 office rag prep -f 文档目录/ --out-dir clean/         # 批量; 另写 clean/qa.json 质检汇总
 office rag prep -f 表.xlsx --header-rows 2           # 表头行数手动兜底(auto 默认)
 office rag prep -f 台账.csv                          # CSV/文本直接摄取(自动编码/分隔符)
-office rag prep -f 汇报.pptx                         # PPT: 每页标题/要点/表格/备注重建(不需 WPS)
-office rag prep -f 表.xlsx --recalc                  # 数组公式/新函数: 先用 WPS 引擎重算再解析
+office rag prep -f 汇报.pptx                         # PPT: 每页标题/要点/表格/备注重建(不需引擎)
+office rag prep -f 表.xlsx --recalc                  # 数组公式/新函数: 先用办公引擎(WPS/LibreOffice)重算再解析
+office rag prep -f 表.xlsx --engine lo               # 指定 LibreOffice 重算(跨平台/服务器)
 office rag prep -f 表.xlsx --engine formulas         # 同上但走跨平台 formulas 包(需装 extra)
 ```
 支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(.xls/.doc/.rtf/.ppt 老格式自动升级;>100MB 拒绝)。
@@ -230,11 +234,12 @@ office rag prep -f 表.xlsx --engine formulas         # 同上但走跨平台 fo
 **内置公式求值器**(90+ 函数, 纯标准库: 统计/条件聚合 SUMIFS·MAXIFS/查找 VLOOKUP·XLOOKUP·INDEX·MATCH/
 逻辑 IF·IFS·IFERROR·IS 系列/文本 TEXT·TEXTJOIN·FIND/日期 EOMONTH·WORKDAY·DATEDIF/数学与财务 PMT·NPV,
 含跨表引用与通配符, 无缓存公式直接算), 算不了回退缓存、再无保留原文记 `formula_unresolved`;
-不支持数组表达式(如 `SUMPRODUCT((区域>n)*区域)`)时加 `--recalc` 用本机 WPS 引擎重算拿到真值,
+不支持数组表达式(如 `SUMPRODUCT((区域>n)*区域)`)时加 `--recalc` 用本机办公引擎重算拿到真值
+(`--engine lo` 指定 LibreOffice, `--engine wps` 指定 WPS),
 或 `--engine formulas` 用 PyPI `formulas` 包(跨平台, 需 `pip install "office-cli[formula]"`);
 百分比/日期按 number_format 渲染;PDF 页脚/页码去噪;
 docx 表格合并单元格展开不重复;ppt 每页→一个 sheet(标题/要点缩进层级/页内表格/备注,
-.ppt 旧格式自动升级,纯 python-pptx 不需 WPS);rtf/.doc 同 docx 管道。产物: `<名>.md`(LLM 友好)+ `<名>.json`
+.ppt 旧格式自动升级,纯 python-pptx 不需引擎);rtf/.doc 同 docx 管道。产物: `<名>.md`(LLM 友好)+ `<名>.json`
 (sheets[].blocks[]: table/notes,含 columns/headers/rows/row_numbers/unresolved/warnings),批量另附
 qa.json(行数/表数/公式未解析/告警/大小/耗时,坏文件不中断)。局限: 表头自动判定以真实规范表格为
 目标,畸形堆叠(粘连的注行+孤儿行)可能误判,可 --header-rows 兜底。

@@ -1,4 +1,4 @@
-"""ppt to-pdf — 演示文稿导出 PDF(经 WPS 演示组件,排版保真)。"""
+"""ppt to-pdf — 演示文稿导出 PDF(本机办公引擎渲染,排版保真)。"""
 
 from __future__ import annotations
 
@@ -10,17 +10,18 @@ from ..cli import add_file_arg
 from ..errors import CliError
 
 NAME = "to-pdf"
-HELP = "PPT 导出 PDF(需本机 WPS Office)"
-DESCRIPTION = """把 .pptx/.ppt 导出为 PDF(经 WPS 演示组件,排版 100% 保真)。
+HELP = "PPT 导出 PDF(需本机 WPS Office 或 LibreOffice)"
+DESCRIPTION = """把 .pptx/.ppt 导出为 PDF(经本机办公引擎渲染,排版保真)。
 
 用法:
   office ppt to-pdf -f 汇报.pptx                 # 输出 汇报.pdf(同目录)
   office ppt to-pdf -f 汇报.pptx --out out/a.pdf
 
 说明:
-- 需要本机安装 WPS Office(可用 office info 查看 engines.wps)
+- 需要本机安装 WPS Office 或 LibreOffice(可用 office info 查看 engines)
+- 引擎选择: 环境变量 OFFICE_ENGINE=auto|wps|lo|none(Windows 优先 WPS,其它平台优先 LibreOffice)
 - 旧版 .ppt 直接导出,无需先转 .pptx
-- 转换在子进程执行,最长 180s;WPS 弹窗/卡死不会拖垮命令
+- 转换在子进程执行,最长 180s;引擎弹窗/卡死不会拖垮命令
 输出 JSON: {"ok": true, "file": "...", "pages": N}
 """
 
@@ -39,12 +40,12 @@ def run(args: argparse.Namespace) -> dict:
     if args.out and not args.out.lower().endswith(".pdf"):
         raise CliError("bad_args", "--out 需以 .pdf 结尾")
 
-    from .. import wps  # 惰性导入
+    from .. import engine  # 惰性导入
 
     out = args.out or os.path.splitext(args.file)[0] + ".pdf"
     if os.path.abspath(out).lower() == os.path.abspath(args.file).lower():
         raise CliError("bad_args", "--out 不能与源文件相同")
-    wps.convert(args.file, out)
+    engine.convert(args.file, out)
 
     pages = None
     try:

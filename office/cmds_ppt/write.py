@@ -103,7 +103,7 @@ def run(args: argparse.Namespace) -> dict:
     try:
         prs.save(out_path)
     except PermissionError:
-        raise CliError("file_busy", f"无法写入 {out_path}: 文件可能正被 WPS/WPS 打开") from None
+        raise CliError("file_busy", f"无法写入 {out_path}: 文件可能正被 WPS/PowerPoint 打开") from None
     except OSError as e:
         raise CliError("write_failed", f"写入 {out_path} 失败: {e}") from e
 

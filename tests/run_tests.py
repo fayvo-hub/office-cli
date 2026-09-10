@@ -32,17 +32,18 @@ _failed = 0
 _failures = []
 
 
-def run(*argv: str) -> tuple[int, dict | None, dict | None]:
+def run(*argv: str, env: dict | None = None) -> tuple[int, dict | None, dict | None]:
     """调用 office;返回 (退出码, stdout JSON, stderr JSON)。
 
     excel 组命令(list/read/write/...)自动加 "excel" 前缀(兼容旧式调用)。
+    env: 额外环境变量(如 OFFICE_ENGINE=lo 测跨平台引擎),与当前环境合并。
     """
     if argv and argv[0] in _EXCEL_CMDS:
         argv = ("excel",) + argv
     proc = subprocess.run(
         [sys.executable, "-m", "office", *argv],
         capture_output=True, text=True, encoding="utf-8",
-        cwd=ROOT, timeout=180,
+        cwd=ROOT, timeout=180, env={**os.environ, **(env or {})},
     )
     out = err = None
     try:
@@ -67,16 +68,16 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         print(f"FAIL  {name}  {detail[:400]}")
 
 
-def expect_ok(name, *argv, **kw):
-    code, out, err = run(*argv)
+def expect_ok(name, *argv, env=None, **kw):
+    code, out, err = run(*argv, env=env)
     ok = code == 0 and out is not None and out.get("ok") is True
     detail = f"code={code} out={out} err={err}" if not ok or VERBOSE else ""
     check(name, ok, detail)
     return out
 
 
-def expect_err(name, errcode, *argv):
-    code, out, err = run(*argv)
+def expect_err(name, errcode, *argv, env=None):
+    code, out, err = run(*argv, env=env)
     got = (err is not None and err.get("error", {}).get("code") == errcode
            and code != 0)
     detail = f"code={code} err={err}" if not got or VERBOSE else ""
@@ -1301,6 +1302,9 @@ def main() -> int:
                    "rag", "prep", "-f", arr_x, "--out-dir", WORK,
                    "--engine", "formulas")
 
+    # ---------- 引擎抽象(WPS / LibreOffice 双后端, 跨平台) ----------
+    engine_checks()
+
     # ---------- rag 公式求值器(内存直测) ----------
     formula_checks()
 
@@ -1313,6 +1317,71 @@ def main() -> int:
     if _failures:
         print("failures:", *_failures, sep="\n  - ")
     return 1 if _failed else 0
+
+
+def engine_checks() -> None:
+    """引擎抽象层: WPS / LibreOffice 双后端、OFFICE_ENGINE 环境变量、CLI 参数优先级。"""
+    out = expect_ok("info engines 字段", "info")
+    eng = (out or {}).get("engines") or {}
+    check("info 含 libreoffice 键", "libreoffice" in eng, str(eng))
+    check("info 含 active 引擎名",
+          eng.get("active") in ("WPS", "LibreOffice", "none"), str(eng))
+    lo_path = eng.get("libreoffice")
+    has_lo = bool(lo_path) and os.path.exists(lo_path)
+    check("info libreoffice 路径有效",
+          not lo_path or os.path.exists(lo_path), str(lo_path))
+
+    # 带公式的小表,用于验证重算后端选择
+    fx = wpath("eng_f.xlsx")
+    from openpyxl import Workbook as _WB
+    _wb = _WB()
+    _w = _wb.active
+    _w["A1"], _w["A2"], _w["A3"] = 1, 2, "=SUM(A1:A2)"
+    _wb.save(fx)
+
+    # OFFICE_ENGINE=none: 自动选引擎时明确报错(不静默降级)
+    expect_err("OFFICE_ENGINE=none 拒绝重算", "engine_unavailable",
+               "rag", "prep", "-f", fx, "--out-dir", WORK, "--recalc",
+               env={"OFFICE_ENGINE": "none"})
+
+    if not has_lo:
+        print("SKIP  引擎用例(未安装 LibreOffice)")
+        return
+
+    # OFFICE_ENGINE=lo: 文档转 PDF 走 LibreOffice(跨平台路径)
+    docx = copy_sample("sample.docx")
+    out = expect_ok("OFFICE_ENGINE=lo docx→pdf", "convert", "-f", docx,
+                    "--out", wpath("lo.pdf"), env={"OFFICE_ENGINE": "lo"})
+    check("lo 转换产物存在", os.path.exists(wpath("lo.pdf")), "")
+    check("lo 转换引擎标记",
+          out and str(out.get("engine", "")).lower() in ("libreoffice", "lo"),
+          str(out))
+
+    # 旧格式升级也走 lo
+    legacy_xls = os.path.join(SAMPLES, "legacy.xls")
+    if os.path.exists(legacy_xls):
+        out = expect_ok("OFFICE_ENGINE=lo xls→xlsx", "convert", "-f", legacy_xls,
+                        "--out", wpath("lo_up.xlsx"), env={"OFFICE_ENGINE": "lo"})
+        check("lo 升级警告带引擎名",
+              out and any("LibreOffice" in w for w in out.get("warnings") or []),
+              str(out.get("warnings") if out else out))
+
+    # 公式重算: auto + OFFICE_ENGINE=lo → LibreOffice 重算并标明来源
+    out = expect_ok("rag --recalc(OFFICE_ENGINE=lo)", "rag", "prep", "-f", fx,
+                    "--out-dir", WORK, "--recalc", env={"OFFICE_ENGINE": "lo"})
+    doc = json.load(open(out["json"], encoding="utf-8")) if out else {}
+    check("lo 重算来源说明",
+          any("LibreOffice" in w for w in doc.get("warnings") or []),
+          str(doc.get("warnings")))
+
+    # CLI 参数优先级高于环境变量: --engine lo 在 OFFICE_ENGINE=none 下仍可用
+    out = expect_ok("--engine lo 覆盖 OFFICE_ENGINE=none", "rag", "prep", "-f", fx,
+                    "--out-dir", WORK, "--engine", "lo",
+                    env={"OFFICE_ENGINE": "none"})
+    doc = json.load(open(out["json"], encoding="utf-8")) if out else {}
+    check("--engine lo 来源说明",
+          any("LibreOffice" in w for w in doc.get("warnings") or []),
+          str(doc.get("warnings")))
 
 
 if __name__ == "__main__":

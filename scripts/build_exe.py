@@ -3,7 +3,8 @@
 用法: python scripts/build_exe.py
 产物: dist/office.exe(约 100MB;每次代码更新后重新构建)
 覆盖: Excel/CSV/JSON/Word/PDF/md→docx|html 等纯 Python 能力
-      + WPS COM 老格式升级(pywin32,经 office.wps_worker 子进程路由)
+      + 老格式升级与 Office→PDF(WPS COM 或跨平台 LibreOffice, 经 office.engine 门面)
+      + xlsx 公式重算(WPS/LibreOffice 无头引擎)
 不覆盖: md→pdf 需要 playwright 库(单文件版不打包,运行时提示装完整版)
 """
 from __future__ import annotations
@@ -21,7 +22,7 @@ def _module_names() -> list[str]:
     # 函数内延迟导入的内部模块 + 动态注册的命令模块
     mods = ["office.wps_worker", "office.convert", "office.info",
             "office.mdutil", "office.docx2md", "office.pdfutil",
-            "office.xlutil", "office.ioplan"]
+            "office.xlutil", "office.ioplan", "office.engine", "office.lo"]
     for f in glob.glob(os.path.join(ROOT, "office", "cmds_*", "*.py")):
         if os.path.basename(f).startswith("_"):
             continue

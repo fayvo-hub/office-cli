@@ -11,7 +11,7 @@ from ..errors import CliError
 
 NAME = "read"
 HELP = "读取 PPT:每页标题/文本/表格/图片/备注"
-DESCRIPTION = """读取演示文稿(.pptx;旧版 .ppt 自动经 WPS 升级后读取),输出每页结构。
+DESCRIPTION = """读取演示文稿(.pptx;旧版 .ppt 自动经办公引擎升级后读取),输出每页结构。
 
 输出 JSON:
 {

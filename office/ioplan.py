@@ -75,20 +75,22 @@ def _upgrade(src: str, src_ext: str, dst_ext: str, kind: str) -> str:
         return _cache[key]
     if not os.path.exists(src):
         raise CliError("no_file", f"文件不存在: {src}")
-    from . import wps  # 惰性导入,避免无 WPS 环境下拖慢启动
+    from . import engine  # 惰性导入,避免无引擎环境下拖慢启动
 
-    if not wps.available():
+    if not engine.available():
         raise CliError(
-            "wps_unavailable",
-            f"'{src}' 是旧版 {src_ext} 格式,需要本机 WPS Office 自动升级后才能操作,"
-            f"但 WPS COM 不可用。请安装/打开 WPS Office 后重试,"
-            f"或先用 WPS 手动另存为 {dst_ext} 文件。",
+            "engine_unavailable",
+            f"'{src}' 是旧版 {src_ext} 格式,需要本机办公引擎(WPS Office 或 LibreOffice)"
+            f"升级后才能操作,但两者都不可用。请安装其一后重试"
+            f"(Windows 可 winget install TheDocumentFoundation.LibreOffice,"
+            f"macOS 可 brew install --cask libreoffice,Linux 可 apt install libreoffice),"
+            f"或先手动另存为 {dst_ext} 文件。",
         )
     fd, tmp = tempfile.mkstemp(prefix=f".office-{kind}-", suffix=dst_ext)
     os.close(fd)
     os.remove(tmp)
     try:
-        wps.convert(src, tmp)
+        engine.convert(src, tmp)
     except CliError:
         try:
             os.remove(tmp)

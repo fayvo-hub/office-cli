@@ -37,7 +37,7 @@ python -m pip install --upgrade "office-cli[mdpdf,wps,images] @ https://github.c
 
 GitHub Releases 提供免安装单文件版(约 120MB):下载 `office.exe` 后直接运行。
 受限项:md→pdf 需 playwright 库(单文件版不含,调用时会提示装完整版);
-.xls/.doc 老格式升级与 docx→pdf 排版导出仍依赖本机 **WPS Office**。
+.xls/.doc 老格式升级与 docx→pdf 排版导出依赖本机办公引擎(**WPS Office** 或 **LibreOffice** 任一)。
 
 ### 开发安装(本仓库)
 
@@ -53,8 +53,33 @@ python scripts/build_exe.py             # 重新打包单文件 exe(需要 pip i
 ### 环境需求
 
 - **md to-pdf** 需要本机 Chrome 或 Edge(用系统浏览器渲染)+ playwright 库;
-- **.xls / .doc 老格式**与 docx→pdf 需要本机 **WPS Office**(自动升级为 .xlsx/.docx 后操作,原文件不动);
+- **.xls / .doc / .ppt 老格式**与 Office→pdf、xlsx 公式重算需要办公引擎:
+  **WPS Office**(Windows 快)或 **LibreOffice**(跨平台,Linux/macOS/容器);
+  两者都没有时会在被用到的命令上报 `engine_unavailable`(纯 Python 功能不受影响);
 - 不确定环境先跑 `office info`(自检依赖/引擎/运行模式 pip|exe)。
+
+### 引擎(WPS / LibreOffice)
+
+只有三类操作需要外部办公套件: 旧格式升级(`.xls/.doc/.rtf/.ppt` → 新格式)、
+Office→PDF 导出(`docx/pptx→pdf`)、xlsx 公式重算(`rag prep --recalc`)。
+它们统一走 `office/engine.py` 门面(调用方不感知后端),选择规则:
+
+| 设置 | 行为 |
+|---|---|
+| 默认(auto) | Windows 有 WPS 用 WPS,否则 LibreOffice;macOS/Linux 反之 |
+| `OFFICE_ENGINE=wps` | 只用 WPS(不可用时 `engine_unavailable`) |
+| `OFFICE_ENGINE=lo` | 只用 LibreOffice(跨平台一致,适合服务器/容器) |
+| `OFFICE_ENGINE=none` | 禁用外部引擎(纯 Python 路径,需要时明确报错) |
+| `LIBREOFFICE_SOFFICE` | 手动指定 soffice 可执行文件路径 |
+
+```bash
+office info                                       # 看 engines.active(WPS/LibreOffice/none)
+OFFICE_ENGINE=lo office word to-pdf -f 报告.docx   # 指定用 LibreOffice 导出
+OFFICE_ENGINE=lo office rag prep -f 表.xlsx --recalc   # 用 LibreOffice 重算公式
+# Linux 容器: apt install libreoffice fonts-noto-cjk(macOS: brew install --cask libreoffice)
+```
+
+版本要求: LibreOffice ≥ 7.3、WPS Office ≥ 2019(Windows)。
 
 ## 通用协议
 
@@ -75,7 +100,8 @@ python scripts/build_exe.py             # 重新打包单文件 exe(需要 pip i
 `no_sheet`/`dup_sheet` sheet 不存在/重名 · `merged_cell` 目标在合并区内 · `too_large` 超过上限 ·
 `file_busy` 文件被占用(自动重试后仍失败) · `encrypted`/`bad_password`/`not_encrypted` PDF 密码相关 ·
 `no_images` PDF 无内嵌图 · `same_file` 输入输出同文件 · `need_dep`/`need_chrome` 缺依赖 ·
-`wps_unavailable`/`wps_timeout` WPS 引擎不可用/超时 · `unsupported_format` 未知扩展名
+`wps_unavailable`/`wps_timeout` 办公引擎不可用/超时(兼容旧码) ·
+`engine_unavailable` 需要引擎但本机无 WPS/LibreOffice · `unsupported_format` 未知扩展名
 
 ## 命令总览
 
@@ -103,7 +129,7 @@ office word write          # 新建/追加段落、标题、表格、代码块�
 office word replace        # 替换/模板占位符填充(正文/表格/页眉, 跨 run 合并)
 office ppt read            # 页/标题/文本层级/表格/图片/备注(可导出图片)
 office ppt write           # 新建/追加幻灯片(标题/要点/表格/图片/备注)
-office ppt to-pdf          # PPT → PDF(WPS 引擎)
+office ppt to-pdf          # PPT → PDF(办公引擎: WPS/LibreOffice)
 office pdf info            # 页数/尺寸/加密/元数据(加密文件也能查)
 office pdf read            # 按页提取文本/表格(可选 --tables)
 office pdf merge           # 合并多个 PDF
@@ -187,7 +213,7 @@ office word write -f 报告.docx --data-file blocks.json   # 追加
 
 `word read` 输出段落(`text/style/level`)、表格(带表头样式名)、图片元数据;`--save-images DIR` 导出正文图片。
 `word replace` 两种用法: `--find 旧词 --replace 新词`(单对)或 `--data-file repl.json` 批量模板替换(JSON 对象 `{"{{金额}}": "12800 元"}`,值 null=删空);加 `--ignore-case` 忽略大小写。命中正文/表格/页眉页脚,优先 run 级精确替换保留样式,跨 run 文本自动合并重建(样式取首 run);`summary` 返回替换数/重建段数。
-`.doc` 文件会先经 WPS 升级为 `.docx` 再读/写,原文件不动。
+`.doc` 文件会先经办公引擎(WPS/LibreOffice)升级为 `.docx` 再读/写,原文件不动。
 
 ### ppt 组
 
@@ -195,12 +221,12 @@ office word write -f 报告.docx --data-file blocks.json   # 追加
 office ppt read -f 演示.pptx                      # 每页 title/texts(含层级)/tables/pictures/notes
 office ppt read -f 演示.pptx --slide 2 --save-images imgs/
 office ppt write -f 演示.pptx --create --data-file slides.json
-office ppt to-pdf -f 演示.pptx --out 演示.pdf    # 走 WPS 引擎
+office ppt to-pdf -f 演示.pptx --out 演示.pdf    # 走办公引擎
 ```
 
 `slides.json`:`{"slides": [{"layout": "title", "title": "季度汇报"}, {"layout": "title-content", "title": "进展", "bullets": ["一", {"text": "子项", "level": 1}], "notes": "备注"}]}`;
 `layout`: `title`(仅标题) / `title-content`(标题+要点,自动选版式) / `blank`(自由摆放,支持 `texts`/`table`/`picture` 坐标尺寸,单位英寸)。
-无 `--create` 时在现有演示文稿末尾追加。`.ppt` 老格式经 WPS 升级后读/追加,原文件不动。
+无 `--create` 时在现有演示文稿末尾追加。`.ppt` 老格式经办公引擎升级后读/追加,原文件不动。
 
 ### pdf 组
 
@@ -233,13 +259,14 @@ office rag prep -f 报表.xls --out-dir clean/        # 老格式自动升级
 office rag prep -f 文档目录/ --out-dir clean/ --recursive
 # xlsx 表头判定手动兜底: auto 自动(默认) / N 固定行数 / 0 无表头
 office rag prep -f 表.xlsx --header-rows 2
-# 公式保真兜底: 数组公式等内置求值器算不出的, 用 WPS 引擎重算后解析(需本机 WPS)
+# 公式保真兜底: 数组公式等内置求值器算不出的, 用办公引擎重算后解析(需 WPS 或 LibreOffice)
+# 显式指定后端: --engine lo(LibreOffice)/wps(WPS)/formulas(PyPI 包)/builtin(默认内置)
 office rag prep -f 表.xlsx --recalc
 # 或改用跨平台 PyPI formulas 引擎(需 pip install "office-cli[formula]")
 office rag prep -f 表.xlsx --engine formulas
 ```
 
-支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(目录批量;.xls/.doc/.rtf/.ppt 老格式自动经 WPS 升级)。
+支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(目录批量;.xls/.doc/.rtf/.ppt 老格式自动经办公引擎升级)。
 与普通转换的关键差异(xlsx 语义重建):
 
 - **多 sheet 全量导出**(隐藏 sheet/空表跳过并说明),不做静默截断
@@ -259,12 +286,12 @@ office rag prep -f 表.xlsx --engine formulas
 - **公式保真三级**: ① 文件自带缓存值(最快) → ② 内置求值器(零依赖, 常见公式全覆盖) →
   ③ 兜底引擎二选一: `--engine formulas`(PyPI `formulas` 包, 跨平台、数组表达式也能算,
   需 `pip install "office-cli[formula]"`;每个文件加载 1~10s)或 `--engine wps`/`--recalc`
-  (本机 WPS 引擎重算, 保真度最高、Windows 专用)
+  (本机办公引擎重算, 保真度最高;WPS 与 LibreOffice 均可, 跨平台用 LibreOffice)
 - **数值按 number_format 渲染**: 百分比(13%→"13%")、日期 ISO(2024-01-12),与 Excel 显示一致
 - CSV 自动识别编码(utf-8-sig/utf-8/gb18030)与分隔符;txt 输出为段落 notes
-- **PPTX 结构重建**(纯 python-pptx,无需 WPS): 每页一个 sheet(「第 N 页 标题」),
+- **PPTX 结构重建**(纯 python-pptx,不需引擎): 每页一个 sheet(「第 N 页 标题」),
   标题/要点保留缩进层级,页内表格→table 块,演讲者备注单独列出;.ppt 旧格式自动升级
-- **RTF/DOC 同 docx 管道**: WPS 升级后走标题层级/表格保留逻辑,原文件不改动
+- **RTF/DOC 同 docx 管道**: 经办公引擎升级后走标题层级/表格保留逻辑,原文件不改动
 - **去噪**: PDF 页脚/页码整行去除(含 ⻚ 兼容字符),docx 标题层级保留、表格合并单元格展开不重复
 - 目录模式 `qa.json` 汇总每个文件的行数/表数/公式未解析/告警/大小/耗时;单文件失败不中断批量
 
@@ -290,8 +317,8 @@ office md to-html -f README.md --out README.html
 |---|---|
 | xlsx/csv/json ↔ xlsx/csv/json | 纯 Python,自动识别编码(utf-8-sig/utf-8/gb18030)与分隔符 |
 | xlsx/csv/json → md/txt | 导出 Markdown 表格 / TSV 纯文本(支持 --sheet/--range/--cached) |
-| .xls → xlsx/csv/json 等 | WPS 升级后转换(WPS Office 需已安装) |
-| docx/doc → docx、docx/doc → pdf | WPS 引擎保真排版(Word 级质量) |
+| .xls → xlsx/csv/json 等 | 经办公引擎升级后转换(需装 WPS 或 LibreOffice) |
+| docx/doc → docx、docx/doc → pdf | 办公引擎保真排版(Word 级质量;WPS/LibreOffice) |
 | docx → md | 结构近似转换:标题/表格/代码/粗斜体 |
 | pdf → docx | pdf2docx 版面还原(可编辑) |
 | md → pdf/docx/html | 见 md 组 |
@@ -302,7 +329,7 @@ office convert -f 表.xlsx --out 表.md                   # 导出 Markdown 表�
 office convert -f 表.xlsx --out 表.txt                  # 导出 TSV 文本(制表符分隔,可无损读回)
 office convert -f 表.xlsx --to json --out 表.json       # 显式指定目标类型
 office convert -f 说明.md --to pdf --out 说明.pdf
-office convert -f 旧报告.doc --to pdf --out 旧报告.pdf  # 走 WPS
+office convert -f 旧报告.doc --to pdf --out 旧报告.pdf  # 走办公引擎
 office convert -f 文档.pdf --to docx --out 文档.docx    # pdf2docx
 ```
 

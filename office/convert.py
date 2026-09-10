@@ -1,12 +1,12 @@
 """convert — 跨格式转换(xlsx/csv/json/xls/doc/docx/pdf/md),按扩展名自动路由。
 
 数据类转换(xlsx<->csv/json)只搬数据、不保留样式;文档类转换按引擎能力保真。
-老格式输入(.xls/.doc)自动经本机 WPS 升级,原文件不动。
+老格式输入(.xls/.doc/.rtf/.ppt)自动经本机办公引擎(WPS 或 LibreOffice)升级,原文件不动。
 
 用法示例:
   office convert -f a.xlsx --sheet Sheet1 --out a.csv
   office convert -f a.csv --out a.xlsx
-  office convert -f 老表.xls --out 新表.xlsx      # WPS 后台升级
+  office convert -f 老表.xls --out 新表.xlsx      # 办公引擎后台升级(OFFICE_ENGINE=lo 换 LibreOffice)
   office convert -f a.docx --out a.pdf            # WPS 导出(排版保真)
   office convert -f 老文档.doc --out 新文档.docx
   office convert -f a.pdf --out a.docx            # pdf2docx 引擎
@@ -77,7 +77,8 @@ def register(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--css", metavar="PATH", default=None,
                     help="(md -> pdf)附加 CSS 文件(覆盖默认样式尾部追加)")
     sp.add_argument("--engine", metavar="ENG", default=None,
-                    help="(docx/doc -> pdf)转换引擎:默认 wps(本机 WPS Office)")
+                    help="(docx/doc -> pdf 与老格式升级)转换引擎:auto(默认,优先本机引擎)"
+                         "| wps | lo(LibreOffice) | none;也可用环境变量 OFFICE_ENGINE")
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -95,21 +96,21 @@ def run(args: argparse.Namespace) -> dict:
     if src_ext in ("xlsx", "xlsm", "xls"):
         if src_ext == "xls":
             if dst_ext == "xlsx":
-                from . import wps
+                from . import engine
 
-                wps.convert(args.file, args.out)
+                engine.convert(args.file, args.out)
                 return {"ok": True, "from": args.file, "to": args.out,
                         "rows": None, "cols": None, "warnings":
-                            [f"{args.file} 为旧版 .xls,已由 WPS 无损升级(原文件未改动)"]}
+                            [f"{args.file} 为旧版 .xls,已由 {engine.name()} 无损升级(原文件未改动)"]}
             # 其他目标:升级到临时 xlsx 再走常规流程
             fd, tmp = tempfile.mkstemp(prefix=".office-cvt-", suffix=".xlsx")
             os.close(fd)
             os.remove(tmp)
             try:
-                from . import wps
+                from . import engine
 
-                wps.convert(args.file, tmp)
-                warnings.append(f"{args.file} 为旧版 .xls,已由 WPS 自动升级后转换")
+                engine.convert(args.file, tmp)
+                warnings.append(f"{args.file} 为旧版 .xls,已由 {engine.name()} 自动升级后转换")
                 return _run_xlsx_conv(args, tmp, dst_ext)
             finally:
                 try:
@@ -142,18 +143,20 @@ def run(args: argparse.Namespace) -> dict:
     # ---------------- Word 文档类 ----------------
     if src_ext in ("docx", "doc"):
         if dst_ext == "pdf":
-            from . import wps
+            from . import engine
 
-            wps.convert(args.file, args.out)
-            up = [f"{args.file} 为旧版 .doc,已由 WPS 自动升级后转换"] if src_ext == "doc" else []
+            engine.convert(args.file, args.out)
+            up = [f"{args.file} 为旧版 .doc,已由 {engine.name()} 自动升级后转换"] \
+                if src_ext == "doc" else []
             return {"ok": True, "from": args.file, "to": args.out,
-                    "engine": "wps", "warnings": up}
+                    "engine": engine.name(), "warnings": up}
         if dst_ext == "docx" and src_ext == "doc":
-            from . import wps
+            from . import engine
 
-            wps.convert(args.file, args.out)
-            return {"ok": True, "from": args.file, "to": args.out, "engine": "wps",
-                    "warnings": ["旧版 .doc 已由 WPS 无损升级,原文件未改动"]}
+            engine.convert(args.file, args.out)
+            return {"ok": True, "from": args.file, "to": args.out,
+                    "engine": engine.name(),
+                    "warnings": [f"旧版 .doc 已由 {engine.name()} 无损升级,原文件未改动"]}
         if dst_ext == "md":
             from .docx2md import docx_to_md
 

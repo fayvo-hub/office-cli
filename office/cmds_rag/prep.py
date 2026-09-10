@@ -4,12 +4,12 @@
 能力(v2):
 - xlsx/xlsm/xls/csv: 多 sheet 全量导出、合并单元格展开(含二维块)、多级表头合成、
   多表分块(一个 sheet 多张表/备注行)、内置公式求值器(90+ 函数, 无缓存公式直接算,
-  算不了回退缓存值,再无则保留原文记 unresolved;--recalc 可改用 WPS 引擎重算)、
+  算不了回退缓存值,再无则保留原文记 unresolved;--recalc 可改用办公引擎重算)、
   百分比/日期按格式渲染、隐藏 sheet 剔除、纯文本 sheet 输出为 notes 块
-- docx/doc/rtf: 内置 docx→md 引擎(标题层级/表格保留),rtf 经 WPS 升级为 docx 后同管道,
+- docx/doc/rtf: 内置 docx→md 引擎(标题层级/表格保留),rtf 经办公引擎升级为 docx 后同管道,
   输出 md + 统计 JSON
-- pptx/ppt: 每页标题/要点/表格/备注 → sheets[].blocks[](纯 python-pptx,无需 WPS;
-  .ppt 旧格式经 WPS 升级)
+- pptx/ppt: 每页标题/要点/表格/备注 → sheets[].blocks[](纯 python-pptx,无需引擎;
+  .ppt 旧格式经办公引擎升级)
 - pdf: 逐页文本 + 表格抽取(复用 pdf read),页脚/页码去噪,输出 md + 结构化 JSON
 - 目录模式: 批量处理并输出 qa.json 质检汇总(坏文件/公式未解析等上库前暴露)
 
@@ -27,7 +27,7 @@ import shutil
 import tempfile
 import time
 
-from .. import ioplan, wps, xlutil
+from .. import engine, ioplan, xlutil
 from .._atomic import replace_with_retry
 from ..cli import add_file_arg
 from ..errors import CliError
@@ -44,7 +44,7 @@ DESCRIPTION = """RAG 知识库摄取前的文档清洗与语义抽取。
                                                    #   pptx/ppt/pdf/txt),另写 clean/qa.json 质检汇总
   office rag prep -f 表.xlsx --header-rows 2      # 手工指定表头行数(auto=自动判定,默认)
   office rag prep -f 台账.csv                     # CSV 直接摄取(自动识别编码/分隔符)
-  office rag prep -f 表.xlsx --recalc             # 先用 WPS 引擎重算公式再解析(数组公式/新函数保真兜底)
+  office rag prep -f 表.xlsx --recalc             # 先用办公引擎重算公式再解析(数组公式/新函数保真兜底)
   office rag prep -f 表.xlsx --engine formulas    # 同上, 但改用跨平台 PyPI formulas 引擎(需装 extra)
 
 xlsx 语义重建(相对普通转换的关键差异):
@@ -58,13 +58,13 @@ xlsx 语义重建(相对普通转换的关键差异):
   跨 sheet 引用与通配符);算不了回退缓存值;再无缓存保留公式原文并记入 formula_unresolved
   (已知不支持: 数组表达式如 SUMPRODUCT((区域>n)*区域)、数组常量 {}、外部链接;
    这两类可加 --engine formulas(跨平台, 需 pip install "office-cli[formula]")或
-   --engine wps / --recalc(本机 WPS 引擎重算)拿到真值)
+   --engine wps / lo / --recalc(本机引擎重算, WPS 或跨平台 LibreOffice)拿到真值)
 - 数值格按 number_format 渲染: 百分比("24.1%")、日期(ISO)与 Excel 显示一致
 
 pptx 重建:
 - 每页一个 sheet("第 N 页 标题"):要点为 notes 块(保留层级),页内表格为 table 块
   (首行为表头),演讲者备注附入 notes
-- 图片/图表只统计不计入文本;.ppt 旧格式自动经 WPS 升级后读取
+- 图片/图表只统计不计入文本;.ppt 旧格式自动经办公引擎升级后读取
 
 输出(每个输入文件):
 - <名>.md   : LLM/分块友好(Markdown 表格、层级标题)
@@ -101,12 +101,14 @@ def register(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--recursive", action="store_true",
                     help="目录模式递归子目录(默认仅当前目录)")
     sp.add_argument("--recalc", action="store_true",
-                    help="先用 WPS 引擎重算 xlsx 全部公式再解析(等价 --engine wps;需本机 WPS)")
-    sp.add_argument("--engine", choices=["auto", "builtin", "formulas", "wps"],
+                    help="先用本机办公引擎重算 xlsx 全部公式再解析"
+                         "(等价 --engine auto+wps/lo;需 WPS 或 LibreOffice)")
+    sp.add_argument("--engine", choices=["auto", "builtin", "formulas", "wps", "lo"],
                     default="auto",
                     help="公式求值后端:auto/builtin 内置求值器(默认,零依赖);"
                          "formulas 第三方包(需 pip install 'office-cli[formula]',"
-                         "能算数组表达式);wps 用本机 WPS 引擎重算(保真度最高)")
+                         "能算数组表达式);wps/lo 用本机办公引擎重算(保真度最高,"
+                         "lo=LibreOffice 跨平台)")
 
 
 # ---------------------------------------------------------------------------
@@ -900,7 +902,7 @@ def _prep_docx(src: str, md_path: str, fmt: str = "docx") -> dict:
     stat = docx2md.docx_to_md(plan.read_path, md_path)
     warnings = []
     if plan.upgraded_from:
-        warnings.append(f"{src} 为 {fmt} 格式,已用 WPS 自动升级后读取(原文件未改动)")
+        warnings.append(f"{src} 为 {fmt} 格式,已用办公引擎自动升级后读取(原文件未改动)")
     return {"format": fmt, "md_path": md_path, "stats": stat,
             "warnings": warnings}
 
@@ -990,6 +992,35 @@ def _collect_inputs(src: str, recursive: bool) -> list[str]:
     return files
 
 
+def _pick_backend(backend: str, args) -> tuple:
+    """解析公式重算用的办公引擎后端 → (convert, recalc, 显示名)。
+
+    engine  = --recalc / 环境变量 auto: 按 engine 门面自动选(WPS 或 LibreOffice)
+    wps/lo  = --engine 显式指定, 目标引擎不可用时报错
+    """
+    if backend == "lo":
+        from .. import lo
+
+        if not lo.available():
+            raise CliError("engine_unavailable",
+                           "未找到 LibreOffice(soffice),无法用 --engine lo 重算公式。"
+                           "请安装 LibreOffice,或用 LIBREOFFICE_SOFFICE 指定路径。")
+        return lo.convert, lo.recalc, "LibreOffice"
+    if backend == "wps":
+        from .. import wps
+
+        if not wps.available():
+            raise CliError("engine_unavailable",
+                           "WPS COM 不可用,无法用 --engine wps 重算公式。"
+                           "可改用 --engine lo(LibreOffice,跨平台)。")
+        return wps.convert, wps.recalc, "WPS"
+    if not engine.available():
+        raise CliError("engine_unavailable",
+                       "本机没有可用的办公引擎(WPS/LibreOffice),无法重算公式。"
+                       "请安装其一,或改用 --engine formulas(PyPI formulas 包)。")
+    return engine.convert, engine.recalc, engine.name()
+
+
 def run(args: argparse.Namespace) -> dict:
     global _header_mode
     if args.header_rows not in ("auto",):
@@ -1026,26 +1057,27 @@ def run(args: argparse.Namespace) -> dict:
                                f"rag prep 暂不支持 '{ext}',仅支持: "
                                f"{', '.join(sorted(_SUPPORTED))}")
             if ext in (".xlsx", ".xlsm", ".xls"):
-                engine = "wps" if args.recalc else args.engine
-                if engine == "auto":
-                    engine = "builtin"
+                backend = "engine" if args.recalc else args.engine
+                if backend == "auto":
+                    backend = "builtin"
                 src_x = f
                 ext_map = None
                 tmp_dir = None
-                if engine == "wps":
+                if backend in ("engine", "wps", "lo"):
+                    _conv, _recalc, _label = _pick_backend(backend, args)
                     tmp_dir = tempfile.mkdtemp(prefix="office-rag-recalc-")
                     recalc_src = f
                     if ext == ".xls":      # 老格式先升级再重算
                         up = os.path.join(tmp_dir, stem + ".xlsx")
-                        wps.convert(f, up)
+                        _conv(f, up)
                         recalc_src = up
                     src_x = os.path.join(tmp_dir, stem + "_recalc.xlsx")
-                    wps.recalc(recalc_src, src_x)
-                elif engine == "formulas":
-                    if ext == ".xls":      # formulas 只认 xlsx,老格式先用 WPS 升级
+                    _recalc(recalc_src, src_x)
+                elif backend == "formulas":
+                    if ext == ".xls":      # formulas 只认 xlsx,老格式先用引擎升级
                         tmp_dir = tempfile.mkdtemp(prefix="office-rag-xls2xlsx-")
                         up = os.path.join(tmp_dir, stem + ".xlsx")
-                        wps.convert(f, up)
+                        engine.convert(f, up)
                         src_x = up
                     ext_map = fmengine.load(src_x)
                 try:
@@ -1053,10 +1085,10 @@ def run(args: argparse.Namespace) -> dict:
                 finally:
                     if tmp_dir:
                         shutil.rmtree(tmp_dir, ignore_errors=True)
-                if engine == "wps":
+                if backend in ("engine", "wps", "lo"):
                     r.setdefault("warnings", []).insert(
-                        0, "公式已由 WPS 引擎重算(数据来源: WPS 计算结果)")
-                elif engine == "formulas":
+                        0, f"公式已由 {_label} 引擎重算(数据来源: 引擎计算结果)")
+                elif backend == "formulas":
                     r.setdefault("warnings", []).insert(
                         0, "公式由 formulas 引擎计算(PyPI formulas 包)")
             elif ext == ".csv":
@@ -1107,7 +1139,13 @@ def run(args: argparse.Namespace) -> dict:
                             "error": {"code": "internal", "message": f"{type(e).__name__}: {e}"}})
 
     if len(files) == 1:
-        return results[0]
+        r0 = results[0]
+        if not r0["ok"]:
+            # 单文件失败按 CLI 契约走错误通道(stderr + 非零码),便于上游判成败
+            err = r0.get("error") or {}
+            raise CliError(err.get("code", "internal"),
+                           f"{r0['file']}: {err.get('message', '处理失败')}")
+        return r0
     # 目录模式: 汇总 + qa.json
     qa_path = os.path.join(out_dir or os.path.dirname(os.path.abspath(args.file)),
                            "qa.json")

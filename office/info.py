@@ -24,12 +24,17 @@ DESCRIPTION = """环境自检:输出本机 Python、各依赖库、转换引擎(
   "platform": "Windows-...",
   "modules": {"openpyxl": true, "docx": true, ...},
   "engines": {
-    "wps": true,                      // 本机 WPS Office COM 可用(旧格式/.docx->pdf 依赖)
+    "active": "WPS",                  // 当前生效的转换引擎(WPS/LibreOffice/none)
+    "wps": true,                      // 本机 WPS Office COM 可用
+    "libreoffice": "C:/Program Files/LibreOffice/program/soffice.exe",  // 跨平台引擎
     "chrome": "C:/.../chrome.exe",    // md->pdf 渲染浏览器
     "edge": "C:/.../msedge.exe",
     "mermaid_assets": true            // md->pdf 的 mermaid 渲染支持文件
   }
 }
+
+引擎说明: 旧格式升级(.xls/.doc/.ppt)与 Office→PDF 依赖 WPS 或 LibreOffice 其一,
+可用环境变量 OFFICE_ENGINE=auto|wps|lo|none 指定;详见 README "引擎"一节。
 
 当某个命令报缺依赖时,先跑 office info 确认环境,再对症处理。
 """
@@ -70,8 +75,12 @@ def run(args: argparse.Namespace) -> dict:
     assets = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "assets", "mermaid.min.js")
     engines["mermaid_assets"] = os.path.exists(assets)
+    from . import engine, lo
+
+    engines["libreoffice"] = lo.path()
     if args.fast:
         engines["wps"] = None
+        engines["active"] = "LibreOffice" if lo.available() else None
     else:
         try:
             from . import wps
@@ -80,9 +89,12 @@ def run(args: argparse.Namespace) -> dict:
         except Exception as e:  # noqa: BLE001
             engines["wps"] = False
             engines["wps_error"] = str(e)
+        engines["active"] = (engine.name() if engine.available() else "none")
+        engines["preference"] = engine.info().get("preference")
 
     missing = [k for k, v in modules.items() if not v]
     mode = "exe" if getattr(sys, "frozen", False) else "pip"
+    has_engine = bool(engines.get("wps") or engines.get("libreoffice"))
     return {
         "ok": True,
         "tool": "office",
@@ -93,7 +105,9 @@ def run(args: argparse.Namespace) -> dict:
         "modules": modules,
         "engines": engines,
         "missing": missing,
-        "tip": ("全部就绪" if not missing and engines.get("wps") is not False
-                else f"缺失库: {missing or '无'};"
-                     f"WPS 状态: {engines.get('wps')} —— 按需 pip install 或安装 WPS Office"),
+        "tip": ("全部就绪" if not missing and has_engine
+                else f"缺失库: {missing or '无'};引擎: "
+                     f"WPS={engines.get('wps')} LibreOffice={engines.get('libreoffice')}"
+                     f" —— 按需 pip install,或安装 WPS Office / LibreOffice"
+                     f"(winget install TheDocumentFoundation.LibreOffice)"),
     }
