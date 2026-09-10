@@ -243,8 +243,9 @@ office rag prep -f 表.xlsx --engine formulas         # 同上但走跨平台 fo
 不支持数组表达式(如 `SUMPRODUCT((区域>n)*区域)`)时加 `--recalc` 用本机办公引擎重算拿到真值
 (`--engine lo` 指定 LibreOffice, `--engine wps` 指定 WPS),
 或 `--engine formulas` 用 PyPI `formulas` 包(跨平台, 需 `pip install "office-cli[formula]"`);
-百分比/日期按 number_format 渲染;PDF 页脚/页码去噪;
-docx 表格合并单元格展开不重复;ppt 每页→一个 sheet(标题/要点缩进层级/页内表格/备注,
+百分比/日期按 number_format 渲染;PDF 页脚/页码去噪、表格内容不再与正文重复;
+docx 表格合并单元格展开不重复(缺 `<w:tblGrid>` 的脏表按行推断列数不丢弃),页标题与正文重复行去重;
+ppt 每页→一个 sheet(标题/要点缩进层级/页内表格/备注,
 .ppt 旧格式自动升级,纯 python-pptx 不需引擎);rtf/.doc 同 docx 管道。产物: `<名>.md`(LLM 友好)+ `<名>.json`
 (sheets[].blocks[]: table/notes,含 columns/headers/rows/row_numbers/unresolved/warnings),批量另附
 qa.json(行数/表数/公式未解析/告警/大小/耗时,坏文件不中断)。局限: 表头自动判定以真实规范表格为
