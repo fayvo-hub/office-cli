@@ -79,6 +79,26 @@ def rtf_to_docx(src: str, dst: str) -> None:
         _quit(app)
 
 
+def recalc_xlsx(src: str, dst: str) -> None:
+    """用 WPS 表格引擎重算 xlsx 全部公式后另存(产生缓存值; 源文件不动)。
+
+    兜底场景: 内置求值器算不出的数组公式/新函数/外部链接。
+    """
+    app = _app("KET.Application")
+    wb = None
+    try:
+        wb = app.Workbooks.Open(src, ReadOnly=False)
+        try:
+            wb.Application.CalculateFullRebuild()
+        except Exception:  # noqa: BLE001 旧版 WPS 无此方法时退回普通重算
+            wb.Application.Calculate()
+        wb.SaveAs(dst, FileFormat=51)
+        wb.Close(False)
+        wb = None
+    finally:
+        _quit(app)
+
+
 def docx_to_pdf(src: str, dst: str) -> None:
     app = _app("KWPS.Application")
     doc = None
@@ -162,6 +182,7 @@ def _ppt_save_pdf(src: str, dst: str) -> None:
 
 _OPS = {
     "xls_to_xlsx": xls_to_xlsx,
+    "recalc_xlsx": recalc_xlsx,
     "doc_to_docx": doc_to_docx,
     "rtf_to_docx": rtf_to_docx,
     "docx_to_pdf": docx_to_pdf,

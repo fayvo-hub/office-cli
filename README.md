@@ -232,6 +232,8 @@ office rag prep -f 报表.xls --out-dir clean/        # 老格式自动升级
 office rag prep -f 文档目录/ --out-dir clean/ --recursive
 # xlsx 表头判定手动兜底: auto 自动(默认) / N 固定行数 / 0 无表头
 office rag prep -f 表.xlsx --header-rows 2
+# 公式保真兜底: 数组公式等内置求值器算不出的, 用 WPS 引擎重算后解析(需本机 WPS)
+office rag prep -f 表.xlsx --recalc
 ```
 
 支持 .xlsx/.xlsm/.xls/.csv/.docx/.doc/.rtf/.pptx/.ppt/.pdf/.txt(目录批量;.xls/.doc/.rtf/.ppt 老格式自动经 WPS 升级)。
@@ -242,8 +244,17 @@ office rag prep -f 表.xlsx --header-rows 2
   二维块坐标记 warning);顶部整行合并标题识别为标题文本、短合并标题(<60% 列宽)抽为副标题,不混入表头
 - **一个 sheet 多张表**(空行分隔)+ 备注/说明段: 输出 blocks 数组(table/notes),表尾“注:…”全宽行不误当标题
 - **多行表头按列合成层级标签**(如 `2023年 / 上半年`),纵向合并导致的重复自动去重
-- **内置公式求值器**: 无缓存公式直接计算(算术/条件 IF/SUMIF(S) 通配/COUNTIF/文本/日期/跨表引用等),
-  算不了回退缓存值,再无缓存保留原文并记入 `formula_unresolved`
+- **内置公式求值器(90+ 函数, 纯标准库零依赖)**: 无缓存公式直接计算 ——
+  统计 SUM/AVERAGE/COUNT(A)/MAX/MIN/MEDIAN/LARGE/SMALL/RANK/STDEV/VAR/PERCENTILE/SUMPRODUCT,
+  条件聚合 SUMIF(S)/COUNTIF(S)/AVERAGEIF(S)/MAXIFS/MINIFS(通配符与比较运算符),
+  查找 VLOOKUP/HLOOKUP/XLOOKUP/LOOKUP/INDEX/MATCH/OFFSET/ROW/COLUMN/ROWS/COLUMNS,
+  逻辑 IF/IFS/AND/OR/NOT/CHOOSE/SWITCH/IFERROR/IFNA/IS* 系列,
+  文本 LEFT/RIGHT/MID/LEN/TRIM/大小写/PROPER/SUBSTITUTE/REPLACE/FIND/SEARCH/TEXT/TEXTJOIN/CONCAT/EXACT/VALUE,
+  日期 TODAY/NOW/DATE/日期拆分/EOMONTH/EDATE/DATEDIF/NETWORKDAYS/WORKDAY/DAYS/WEEKDAY/DATEVALUE,
+  数学与财务 SQRT/POWER/LOG/INT/MOD/ROUND 系列/CEILING/FLOOR/TRUNC/SUMSQ/PRODUCT/PMT/FV/PV/NPV/IRR;
+  算不了回退缓存值, 再无缓存保留原文并记入 `formula_unresolved`
+- **公式保真三级**: ① 文件自带缓存值(最快) → ② 内置求值器(零依赖, 常见公式全覆盖) →
+  ③ `--recalc` 用本机 WPS/Excel 引擎重算(100% 保真: 数组表达式、新函数、外部引用都能算, 每个文件数秒)
 - **数值按 number_format 渲染**: 百分比(13%→"13%")、日期 ISO(2024-01-12),与 Excel 显示一致
 - CSV 自动识别编码(utf-8-sig/utf-8/gb18030)与分隔符;txt 输出为段落 notes
 - **PPTX 结构重建**(纯 python-pptx,无需 WPS): 每页一个 sheet(「第 N 页 标题」),

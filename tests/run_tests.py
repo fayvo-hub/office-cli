@@ -134,6 +134,9 @@ def formula_checks() -> None:
                 (1, 5): "", (2, 5): "好", (3, 5): "", (4, 5): "", (5, 5): "差",
                 (7, 1): "苹果", (7, 2): 300, (7, 3): 9.0, (7, 4): "=B7*C7",
                 (9, 1): "=B9", (9, 2): "=A9",
+                (1, 6): 1, (2, 6): 2, (3, 6): 3, (4, 6): 4, (5, 6): 5,
+                (1, 7): "一", (2, 7): "二", (3, 7): "三", (4, 7): "四", (5, 7): "五",
+                (1, 8): 100.0, (2, 8): -50.0, (3, 8): -40.0, (4, 8): -30.0,
             }
             self.TABLES = {
                 "销售": self.sales,
@@ -268,6 +271,113 @@ def formula_checks() -> None:
     ck("文本算术", evr('="abc"+1'))
     ck("TRUE/FALSE", ev("=TRUE") is True and ev("=FALSE") is False)
     ck("ROUND", ev("=ROUND(B1/3,2)") == 33.33)
+    # ---- v3 新函数: 惰性/错误捕获 ----
+    ck("IF惰性分支", ev('=IF(B1>50,"ok",1/0)') == "ok")
+    ck("IFERROR除零", ev('=IFERROR(1/0,"兜底")') == "兜底")
+    ck("IFERROR正常", ev('=IFERROR(B1,"兜底")') == 100)
+    ck("IFERROR包查找", ev('=IFERROR(VLOOKUP("柚子",A1:B5,2,FALSE),"无")') == "无")
+    ck("IFNA未命中", ev('=IFNA(VLOOKUP("柚子",A1:B5,2,FALSE),"无")') == "无")
+    ck("ISERROR/ISNA/ISERR", ev("=ISERROR(1/0)") is True
+       and ev("=ISERROR(B1)") is False
+       and ev("=ISNA(NA())") is True
+       and ev("=ISERR(NA())") is False
+       and ev("=ISERR(1/0)") is True)
+    ck("IFS", ev('=IFS(B1>200,"高",B1>50,"中",TRUE,"低")') == "中")
+    ck("SWITCH", ev('=SWITCH(A1,"苹果","A","香蕉","B","其他")') == "A")
+    ck("CHOOSE", ev('=CHOOSE(2,"一","二","三")') == "二")
+    ck("CHOOSE越界", evr('=CHOOSE(5,"一")'))
+    ck("NA错误", evr("=NA()"))
+    # ---- v3 新函数: 查找族 ----
+    ck("VLOOKUP精确", ev('=VLOOKUP("香蕉",A1:B5,2,FALSE)') == 150)
+    ck("VLOOKUP未命中", evr('=VLOOKUP("柚子",A1:B5,2,FALSE)'))
+    ck("VLOOKUP列越界", evr('=VLOOKUP("苹果",A1:B5,9,FALSE)'))
+    ck("VLOOKUP近似升序", ev("=VLOOKUP(3.5,F1:G5,2,TRUE)") == "三")
+    ck("VLOOKUP通配", ev('=VLOOKUP("苹*",A1:B5,2,FALSE)') == 100)
+    ck("HLOOKUP", ev("=HLOOKUP(100,A1:C5,3,FALSE)") == 200)
+    ck("MATCH精确/近似/通配", ev('=MATCH("橙子",A1:A5,0)') == 5
+       and ev("=MATCH(3.5,F1:F5,1)") == 3
+       and ev('=MATCH("梨*",A1:A5,0)') == 4)
+    ck("MATCH未命中", evr('=MATCH("柚子",A1:A5,0)'))
+    ck("INDEX行列", ev("=INDEX(A1:C5,2,2)") == 150)
+    ck("INDEX单列", ev("=INDEX(B1:B5,3)") == 200)
+    ck("INDEX整列引用", ev("=SUM(INDEX(A1:C5,0,2))") == 590.0)
+    ck("INDEX越界", evr("=INDEX(A1:C5,9,2)"))
+    ck("XLOOKUP", ev('=XLOOKUP("橙子",A1:A5,B1:B5)') == 60)
+    ck("XLOOKUP默认值", ev('=XLOOKUP("柚子",A1:A5,B1:B5,"无")') == "无")
+    ck("XLOOKUP未找到报错", evr('=XLOOKUP("柚子",A1:A5,B1:B5)'))
+    ck("XLOOKUP向下/向上近似", ev("=XLOOKUP(3.5,F1:F5,G1:G5,0,-1)") == "三"
+       and ev("=XLOOKUP(3.5,F1:F5,G1:G5,0,1)") == "四")
+    ck("LOOKUP近似", ev("=LOOKUP(3.5,F1:F5,G1:G5)") == "三")
+    # ---- v3 新函数: 统计/条件聚合 ----
+    ck("SUMPRODUCT", ev("=SUMPRODUCT(B1:B5,C1:C5)") == 6065.0)
+    ck("MEDIAN/LARGE/SMALL", ev("=MEDIAN(B1:B5)") == 100
+       and ev("=LARGE(B1:B5,2)") == 150 and ev("=SMALL(B1:B5,2)") == 80)
+    ck("RANK", ev("=RANK(150,B1:B5)") == 2)
+    ck("STDEV/VAR", ev("=ROUND(STDEV(B1:B5),2)") == 56.75
+       and ev("=VAR.P(B1:B5)") == 2576.0)
+    ck("PRODUCT", ev("=PRODUCT(F1:F5)") == 120)
+    ck("PERCENTILE", ev("=PERCENTILE(B1:B5,0.5)") == 100)
+    ck("COUNTIF不等于", ev('=COUNTIF(A1:A5,"<>苹果")') == 3)
+    ck("AVERAGEIF", ev('=AVERAGEIF(A1:A5,"苹果",B1:B5)') == 150)
+    ck("AVERAGEIFS", ev('=ROUND(AVERAGEIFS(B1:B5,A1:A5,"<>苹果"),2)') == 96.67)
+    ck("MAXIFS/MINIFS", ev('=MAXIFS(B1:B5,A1:A5,"<>苹果")') == 150
+       and ev('=MINIFS(B1:B5,A1:A5,"<>苹果")') == 60)
+    # ---- v3 新函数: 数学/财务 ----
+    ck("SQRT/LOG/LOG10", ev("=SQRT(16)") == 4 and ev("=LOG(8,2)") == 3
+       and ev("=LOG10(1000)") == 3)
+    ck("POWER/EXP", ev("=POWER(2,10)") == 1024
+       and ev("=ROUND(EXP(1),5)") == 2.71828)
+    ck("CEILING/FLOOR/MROUND", ev("=CEILING(2.1,1)") == 3
+       and ev("=FLOOR(2.9,1)") == 2 and ev("=MROUND(2.5,1)") == 3)
+    ck("TRUNC/SIGN", ev("=TRUNC(3.14159,2)") == 3.14 and ev("=SIGN(-5)") == -1)
+    ck("EVEN/ODD/FACT", ev("=EVEN(3)") == 4 and ev("=ODD(2)") == 3
+       and ev("=FACT(5)") == 120)
+    ck("SUMSQ", ev("=SUMSQ(B1:B5)") == 82500)
+    ck("PMT/FV/PV", ev("=ROUND(PMT(0.05/12,120,200000),2)") == -2121.31
+       and ev("=ROUND(FV(0.05,10,-1000),2)") == 12577.89
+       and ev("=ROUND(PV(0.05,10,-1000),2)") == 7721.73)
+    ck("NPV", ev("=ROUND(NPV(0.1,B1:B3),2)") == 365.14)
+    ck("IRR", ev("=ROUND(IRR(H1:H4),4)") == 0.1065)
+    # ---- v3 新函数: 引用族 ----
+    ck("ROW/COLUMN", ev("=ROW()") == 1 and ev("=COLUMN()") == 1
+       and ev("=ROW(B3)") == 3 and ev("=COLUMN(C1)") == 3)
+    ck("ROWS/COLUMNS", ev("=ROWS(B1:B5)") == 5 and ev("=COLUMNS(A1:C1)") == 3)
+    ck("OFFSET区域", ev("=SUM(OFFSET(B1,1,1,2,1))") == 17.5)
+    ck("OFFSET单格", ev("=OFFSET(B1,4,0)") == 60)
+    ck("OFFSET越界", evr("=OFFSET(A1,-1,0)"))
+    # ---- v3 新函数: 日期族 ----
+    ck("YEAR/MONTH/DAY", ev("=YEAR(DATE(2024,1,12))") == 2024
+       and ev("=MONTH(DATE(2024,1,12))") == 1 and ev("=DAY(DATE(2024,1,12))") == 12)
+    ck("EOMONTH/EDATE", ev("=DAY(EOMONTH(DATE(2024,1,15),1))") == 29
+       and ev("=DAY(EDATE(DATE(2024,1,31),1))") == 29)
+    ck("DATEDIF", ev('=DATEDIF(DATE(2020,1,1),DATE(2024,3,5),"Y")') == 4
+       and ev('=DATEDIF(DATE(2020,1,1),DATE(2024,3,5),"M")') == 50
+       and ev('=DATEDIF(DATE(2020,1,1),DATE(2024,3,5),"D")') == 1525)
+    ck("DAYS/WEEKDAY", ev("=DAYS(DATE(2024,1,12),DATE(2024,1,1))") == 11
+       and ev("=WEEKDAY(DATE(2024,1,12))") == 6
+       and ev("=WEEKDAY(DATE(2024,1,12),2)") == 5)
+    ck("NETWORKDAYS/WORKDAY", ev("=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12))") == 10
+       and ev("=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12),DATE(2024,1,3))") == 9
+       and ev("=DAY(WORKDAY(DATE(2024,1,12),1))") == 15)
+    ck("DATEVALUE", ev('=DATEVALUE("2024年1月12日")') == _dt.date(2024, 1, 12)
+       and ev('=DATEVALUE("2024-01-12")') == _dt.date(2024, 1, 12))
+    ck("TIME/HOUR/MINUTE", ev("=HOUR(TIME(13,30,0))") == 13
+       and ev("=MINUTE(TIME(13,30,0))") == 30)
+    # ---- v3 新函数: 文本族 ----
+    ck("TEXT百分比", ev('=TEXT(0.135,"0.0%")') == "13.5%")
+    ck("TEXT千分位", ev('=TEXT(1234.5,"#,##0.00")') == "1,234.50")
+    ck("TEXT日期", ev('=TEXT(DATE(2024,1,12),"yyyy年m月d日")') == "2024年1月12日")
+    ck("TEXTJOIN/CONCAT", ev('=TEXTJOIN("-",TRUE,"a","","b")') == "a-b"
+       and ev('=CONCAT(A1:A2)') == "苹果香蕉")
+    ck("FIND/SEARCH", ev('=FIND("果",A1)') == 2 and ev('=SEARCH("A","abc")') == 1)
+    ck("FIND未找到", evr('=FIND("柚子",A1)'))
+    ck("REPLACE/REPT", ev('=REPLACE("2024年01月",6,2,"12")') == "2024年12月"
+       and ev('=REPT("ab",3)') == "ababab")
+    ck("EXACT", ev('=EXACT("a","A")') is False and ev('=EXACT("a","a")') is True)
+    ck("VALUE", ev('=VALUE("¥1,234.50")') == 1234.5 and ev('=VALUE("15%")') == 0.15)
+    ck("PROPER/CLEAN", ev('=PROPER("hello world")') == "Hello World"
+       and ev('=CLEAN("a"&CHAR(9)&"b")') == "ab")
+    ck("CHAR/CODE", ev("=CHAR(65)") == "A" and ev('=CODE("A")') == 65)
 
 
 def main() -> int:
@@ -1131,6 +1241,39 @@ def main() -> int:
     md_rtf = open(out["md"], encoding="utf-8").read()
     check("rag rtf 内容", out.get("format") == "rtf"
           and "夜班共完成 12 批" in md_rtf, md_rtf[:120])
+
+    # rag prep --recalc: 数组公式等内置求值器算不出的公式靠 WPS 引擎兜底
+    arr_x = wpath("rag_arr.xlsx")
+    from openpyxl import Workbook as _WB
+    _wb = _WB()
+    _ws = _wb.active
+    _ws.title = "明细"
+    _ws["A1"], _ws["B1"], _ws["C1"] = "物料", "单价", "数量"
+    for _i, (_n, _p, _q) in enumerate([("A", 10.0, 3), ("B", 20.0, 5)], start=2):
+        _ws[f"A{_i}"], _ws[f"B{_i}"], _ws[f"C{_i}"] = _n, _p, _q
+        _ws[f"D{_i}"] = f"=ROUND(B{_i}*C{_i},2)"
+    _ws["F2"] = "=SUMPRODUCT((C2:C3>3)*B2:B3*C2:C3)"
+    _wb.save(arr_x)
+    out = expect_ok("rag prep 数组公式", "rag", "prep", "-f", arr_x,
+                    "--out-dir", WORK)
+    doc = json.load(open(out["json"], encoding="utf-8"))
+    arr_unres = [u["formula"] for s in doc["sheets"] for b in s["blocks"]
+                 for u in b.get("formula_unresolved") or []]
+    check("rag 数组公式记 unresolved",
+          any("SUMPRODUCT" in f for f in arr_unres), str(arr_unres))
+    out = expect_ok("rag prep --recalc", "rag", "prep", "-f", arr_x,
+                    "--out-dir", WORK, "--recalc")
+    doc = json.load(open(out["json"], encoding="utf-8"))
+    arr_unres = [u["formula"] for s in doc["sheets"] for b in s["blocks"]
+                 for u in b.get("formula_unresolved") or []]
+    arr_vals = [c for s in doc["sheets"] for b in s["blocks"]
+                for row in b.get("rows") or [] for c in row]
+    check("rag --recalc 算出数组公式", not arr_unres and any(
+        isinstance(v, (int, float)) and abs(float(v) - 100.0) < 1e-6
+        for v in arr_vals), f"{arr_unres} {str(arr_vals)[:160]}")
+    check("rag --recalc 有来源说明",
+          any("WPS" in w for w in doc.get("warnings") or []),
+          str(doc.get("warnings")))
 
     # ---------- rag 公式求值器(内存直测) ----------
     formula_checks()

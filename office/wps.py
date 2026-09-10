@@ -10,6 +10,7 @@ WPS 崩溃/卡死不会拖垮命令行。转换过程不弹窗(Visible=False)。
   .doc  -> .pdf       (内部先转 docx)
   .ppt  -> .pptx      (KWPP 演示)
   .pptx/.ppt -> .pdf  (KWPP 导出 PDF)
+  .xlsx/.xlsm 重算    (KET 引擎重算全部公式后另存 → 产生缓存值)
 """
 
 from __future__ import annotations
@@ -95,6 +96,17 @@ def convert(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
     if not os.path.exists(src):
         raise CliError("no_file", f"文件不存在: {src}")
     _run_worker({"op": op, "src": src, "dst": dst}, timeout=timeout)
+
+
+def recalc(src: str, dst: str, timeout: int = _DEFAULT_TIMEOUT) -> None:
+    """用 WPS 表格引擎重算 src 的全部公式并另存为 dst(源文件不动)。
+
+    比内置求值器保真度更高(支持数组公式/全部内置函数/外部计算),
+    代价是依赖本机 WPS、每文件数秒。
+    """
+    if not os.path.exists(src):
+        raise CliError("no_file", f"文件不存在: {src}")
+    _run_worker({"op": "recalc_xlsx", "src": src, "dst": dst}, timeout=timeout)
 
 
 def is_legacy(path: str, ext: str | None = None) -> bool:

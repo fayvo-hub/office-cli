@@ -3,9 +3,9 @@
 
 能力(v2):
 - xlsx/xlsm/xls/csv: 多 sheet 全量导出、合并单元格展开(含二维块)、多级表头合成、
-  多表分块(一个 sheet 多张表/备注行)、内置公式求值器(无缓存公式直接算,
-  算不了回退缓存值,再无则保留原文记 unresolved)、百分比/日期按格式渲染、
-  隐藏 sheet 剔除、纯文本 sheet 输出为 notes 块
+  多表分块(一个 sheet 多张表/备注行)、内置公式求值器(90+ 函数, 无缓存公式直接算,
+  算不了回退缓存值,再无则保留原文记 unresolved;--recalc 可改用 WPS 引擎重算)、
+  百分比/日期按格式渲染、隐藏 sheet 剔除、纯文本 sheet 输出为 notes 块
 - docx/doc/rtf: 内置 docx→md 引擎(标题层级/表格保留),rtf 经 WPS 升级为 docx 后同管道,
   输出 md + 统计 JSON
 - pptx/ppt: 每页标题/要点/表格/备注 → sheets[].blocks[](纯 python-pptx,无需 WPS;
@@ -23,9 +23,11 @@ import json
 import math
 import os
 import re
+import shutil
+import tempfile
 import time
 
-from .. import ioplan, xlutil
+from .. import ioplan, wps, xlutil
 from .._atomic import replace_with_retry
 from ..cli import add_file_arg
 from ..errors import CliError
@@ -41,6 +43,7 @@ DESCRIPTION = """RAG 知识库摄取前的文档清洗与语义抽取。
                                                    #   pptx/ppt/pdf/txt),另写 clean/qa.json 质检汇总
   office rag prep -f 表.xlsx --header-rows 2      # 手工指定表头行数(auto=自动判定,默认)
   office rag prep -f 台账.csv                     # CSV 直接摄取(自动识别编码/分隔符)
+  office rag prep -f 表.xlsx --recalc             # 先用 WPS 引擎重算公式再解析(数组公式/新函数保真兜底)
 
 xlsx 语义重建(相对普通转换的关键差异):
 - 多 sheet 全部导出(隐藏 sheet 剔除);合并单元格展开: 纵向向下、横向向右、
@@ -49,8 +52,10 @@ xlsx 语义重建(相对普通转换的关键差异):
   每张表独立表头;纯文本段输出 notes 文本块
 - 顶部整行合并的标题识别为 title,顶部短合并标题(<60% 列宽)抽为 subtitle 不混入表头
 - 多级表头按列合成层级标签("2023年 / 上半年")
-- 公式格: 内置求值器直接计算(跨表/条件聚合/文本/日期等);算不了回退缓存值;
-  再无缓存保留公式原文并记入 formula_unresolved
+- 公式格: 内置求值器直接计算(90+ 函数: 算术/统计/条件聚合/查找/逻辑/文本/日期/数学/财务,
+  跨 sheet 引用与通配符);算不了回退缓存值;再无缓存保留公式原文并记入 formula_unresolved
+  (已知不支持: 数组表达式如 SUMPRODUCT((区域>n)*区域)、数组常量 {}、外部链接;
+   这两类可加 --recalc 用本机 WPS 引擎重算拿到真值)
 - 数值格按 number_format 渲染: 百分比("24.1%")、日期(ISO)与 Excel 显示一致
 
 pptx 重建:
@@ -92,6 +97,9 @@ def register(sp: argparse.ArgumentParser) -> None:
                     help="xlsx 表头行数:auto 自动判定(默认)/ 数字固定 N / 0 无表头")
     sp.add_argument("--recursive", action="store_true",
                     help="目录模式递归子目录(默认仅当前目录)")
+    sp.add_argument("--recalc", action="store_true",
+                    help="先用 WPS 引擎重算 xlsx 全部公式再解析(需本机 WPS;"
+                         "数组公式等内置求值器算不出的公式走此兜底)")
 
 
 # ---------------------------------------------------------------------------
@@ -1005,7 +1013,25 @@ def run(args: argparse.Namespace) -> dict:
                                f"rag prep 暂不支持 '{ext}',仅支持: "
                                f"{', '.join(sorted(_SUPPORTED))}")
             if ext in (".xlsx", ".xlsm", ".xls"):
-                r = _prep_xlsx(f)
+                src_x = f
+                recalc_dir = None
+                if args.recalc:
+                    recalc_dir = tempfile.mkdtemp(prefix="office-rag-recalc-")
+                    recalc_src = f
+                    if ext == ".xls":      # 老格式先升级再重算
+                        up = os.path.join(recalc_dir, stem + ".xlsx")
+                        wps.convert(f, up)
+                        recalc_src = up
+                    src_x = os.path.join(recalc_dir, stem + "_recalc.xlsx")
+                    wps.recalc(recalc_src, src_x)
+                try:
+                    r = _prep_xlsx(src_x)
+                finally:
+                    if recalc_dir:
+                        shutil.rmtree(recalc_dir, ignore_errors=True)
+                if args.recalc:
+                    r.setdefault("warnings", []).insert(
+                        0, "公式已由 WPS 引擎重算(数据来源: WPS 计算结果)")
             elif ext == ".csv":
                 r = _prep_csv(f)
             elif ext == ".txt":

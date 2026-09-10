@@ -7,15 +7,29 @@ v2 对常用公式直接求值 —— 求值器覆盖真实台账高频场景:
 - 算术: + - * / ^ %、一元负、括号、文本连接 &
 - 比较: = <> < > <= >=(结果供 IF/条件用)
 - 引用: A1 / $A$1 / A1:B3 / A:A 整列 / Sheet1!A1 / '工作 表'!A1:B2(跨 sheet)
-- 函数: SUM AVERAGE COUNT COUNTA COUNTBLANK MAX MIN IF AND OR NOT
-        SUMIF SUMIFS COUNTIF COUNTIFS
-        ROUND ROUNDUP ROUNDDOWN INT ABS MOD
-        LEFT RIGHT MID LEN TRIM UPPER LOWER SUBSTITUTE CONCATENATE
-        TODAY NOW TRUE FALSE
-        ISNUMBER ISBLANK ISTEXT ISNONTEXT ISLOGICAL
+- 函数: 聚合 SUM AVERAGE COUNT COUNTA COUNTBLANK MAX MIN PRODUCT SUMPRODUCT
+        MEDIAN LARGE SMALL RANK STDEV(.S/.P) VAR(.S/.P) PERCENTILE
+        条件 SUMIF(S) COUNTIF(S) AVERAGEIF(S) MAXIFS MINIFS
+        数学 ROUND ROUNDUP ROUNDDOWN INT ABS MOD SQRT EXP LN LOG LOG10 POWER
+        SIGN TRUNC CEILING FLOOR MROUND FACT EVEN ODD SUMSQ
+        财务 PMT FV PV NPV IRR
+        逻辑 IF IFS IFERROR IFNA AND OR NOT CHOOSE SWITCH
+        查找 VLOOKUP HLOOKUP XLOOKUP LOOKUP INDEX MATCH
+        引用 ROW COLUMN ROWS COLUMNS OFFSET
+        文本 LEFT RIGHT MID LEN TRIM UPPER LOWER SUBSTITUTE CONCATENATE CONCAT
+        TEXTJOIN TEXT FIND SEARCH REPLACE REPT EXACT VALUE PROPER CLEAN CHAR CODE
+        日期 TODAY NOW DATE DATEVALUE YEAR MONTH DAY HOUR MINUTE SECOND WEEKDAY
+        DAYS EOMONTH EDATE DATEDIF TIME NETWORKDAYS WORKDAY
+        信息 ISNUMBER ISBLANK ISTEXT ISNONTEXT ISLOGICAL ISERROR ISERR ISNA NA
 
 原则:
-- 能算的算出真值;算不了(未知函数/VLOOKUP/循环引用/外部链接)由调用方保留原文并记录原因
+- 能算的算出真值;算不了(未知函数/循环引用/外部链接/数组公式)由调用方保留原文并记录原因
+- 已知缺口与兜底: 数组表达式(如 `=SUMPRODUCT((C5:C9>3)*B5:B9)`)、数组常量 `{…}`、
+  RAND/INDIRECT 类易变函数不实现 —— 需真值时 `office rag prep --recalc` 用本机 WPS/Excel
+  引擎重算后读缓存(实测同批 23 条公式: WPS 23/23、本求值器 21/23(差数组表达式与
+  EOMONTH 日期表示)、PyPI formulas 包 23/23 但需 numpy+scipy 且单文件加载 1~10s)
+- IF/IFS/IFERROR/CHOOSE/SWITCH 惰性求值: 只算被选中的分支(与 Excel 一致, 避免 false 分支抛错)
+- 不实现易变函数(RAND/RANDBETWEEN/OFFSET 的易变部分除外);数组常量 {…} 不支持
 - 日期按 Excel 1900 序列号参与运算,输出还原为 ISO 日期
 - 不引入任何第三方依赖,纯标准库
 
@@ -28,6 +42,7 @@ v2 对常用公式直接求值 —— 求值器覆盖真实台账高频场景:
 
 from __future__ import annotations
 
+import calendar
 import datetime as _dt
 import fnmatch
 import math
@@ -39,7 +54,15 @@ _DATE_EPOCH = _dt.date(1899, 12, 30)   # Excel 1900 序列号基准
 
 
 class FormulaError(Exception):
-    """求值失败(引用错误/除零/不支持函数/循环等)。message 面向调用方展示。"""
+    """求值失败(引用错误/除零/不支持函数/循环等)。message 面向调用方展示。
+
+    code 为可选的 Excel 错误类别('na'/'value'/'ref'/'div0'/'num'/'name'),
+    供 IFNA/ISNA/ISERR 等区分; 缺省 None 表示普通算不出。
+    """
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 def _to_number(v) -> float:
@@ -104,7 +127,7 @@ _TOKEN_RE = re.compile(r"""
   | (?P<sq>'[^']*')
   | (?P<num>\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)
   | (?P<ident>[A-Za-z_\u4e00-\u9fff][A-Za-z_\u4e00-\u9fff]*)
-  | (?P<op><>|<=|>=|=|<|>|&|\+|-|\*|/|\^|%|\(|\)|,|:|!|\$)
+  | (?P<op><>|<=|>=|=|<|>|&|\+|-|\*|/|\^|%|\(|\)|,|:|!|\$|\.)
 """, re.X)
 
 # 引用语法里会出现: $ A1 : ! '名称' 等,由 parser 在 token 流上直接拼
@@ -113,9 +136,35 @@ _TEXT_FUNCS = {"LEFT", "RIGHT", "MID", "LEN", "TRIM", "UPPER", "LOWER",
                "SUBSTITUTE", "CONCATENATE"}
 _LOG_FUNCS = {"AND", "OR", "NOT"}
 _AGG_FUNCS = {"SUM", "AVERAGE", "COUNT", "COUNTA", "COUNTBLANK", "MAX", "MIN",
-              "SUMIF", "SUMIFS", "COUNTIF", "COUNTIFS"}
+              "SUMIF", "SUMIFS", "COUNTIF", "COUNTIFS",
+              "AVERAGEIF", "AVERAGEIFS", "MAXIFS", "MINIFS"}
 _DATE_FUNCS = {"TODAY", "NOW", "DATE"}
 _INFO_FUNCS = {"ISNUMBER", "ISBLANK", "ISTEXT", "ISNONTEXT", "ISLOGICAL"}
+_EXTRA_INFO_FUNCS = {"ISERROR", "ISERR", "ISNA"}
+# 惰性参数族(只求值用到的分支): 条件/错误捕获/多路选择
+_LAZY_FUNCS = {"IF", "IFS", "IFERROR", "IFNA", "CHOOSE", "SWITCH",
+               "ISERROR", "ISERR", "ISNA"}
+# 统计族(区域展开, 引用中的文本/布尔忽略)
+_STAT_FUNCS = {"MEDIAN", "LARGE", "SMALL", "RANK", "RANK.EQ", "STDEV",
+               "STDEV.S", "STDEV.P", "VAR", "VAR.S", "VAR.P", "PRODUCT",
+               "PERCENTILE", "SUMPRODUCT"}
+# 数学/财务族
+_MATH_FUNCS = {"SQRT", "EXP", "LN", "LOG", "LOG10", "SIGN", "TRUNC",
+               "POWER", "CEILING", "FLOOR", "MROUND", "FACT", "EVEN",
+               "ODD", "SUMSQ", "PMT", "FV", "PV", "NPV", "IRR"}
+# 查找族
+_LOOKUP_FUNCS = {"VLOOKUP", "HLOOKUP", "INDEX", "MATCH", "XLOOKUP", "LOOKUP"}
+# 引用族
+_REF_FUNCS = {"ROW", "COLUMN", "ROWS", "COLUMNS", "OFFSET"}
+# 日期族扩展
+_EXTRA_DATE_FUNCS = {"YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND",
+                     "WEEKDAY", "DAYS", "EOMONTH", "EDATE", "DATEDIF",
+                     "DATEVALUE", "TIME", "NETWORKDAYS", "WORKDAY"}
+# 文本族扩展
+_EXTRA_TEXT_FUNCS = {"FIND", "SEARCH", "REPLACE", "REPT", "EXACT", "VALUE",
+                     "PROPER", "CLEAN", "CHAR", "CODE", "TEXTJOIN",
+                     "CONCAT", "TEXT"}
+_NA_FUNCS = {"NA"}
 
 
 def _is_ref(a):
@@ -156,6 +205,148 @@ def _tokenize(s: str) -> list[_Tok]:
         else:
             toks.append(_Tok(m.group(), m.group()))
     return toks
+
+
+# ---------------------------------------------------------------------------
+# 文本/日期格式化辅助(模块级, 供 TEXT 与日期族复用)
+# ---------------------------------------------------------------------------
+
+_DATE_TEXT_RES = (
+    re.compile(r"^(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})日?$"),
+    re.compile(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$"),
+)
+
+
+def _parse_date_text(s: str):
+    """常见日期文本 → date; 失败 None(2024-01-12 / 2024年1月12日 / 1/12/2024 / 20240112)。"""
+    t = s.strip()
+    if not t:
+        return None
+    for i, rx in enumerate(_DATE_TEXT_RES):
+        m = rx.match(t)
+        if m:
+            g = [int(x) for x in m.groups()]
+            y, mo, d = (g[2], g[0], g[1]) if i == 1 else (g[0], g[1], g[2])
+            try:
+                return _dt.date(y, mo, d)
+            except ValueError:
+                return None
+    if re.fullmatch(r"\d{8}", t):
+        try:
+            return _dt.date(int(t[:4]), int(t[4:6]), int(t[6:]))
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_number_text(s: str):
+    """数值文本 → float(去千分位/货币/空格, 支持 % 与括号负数); 失败 None。"""
+    t = s.strip()
+    if not t:
+        return None
+    neg = t.startswith("(") and t.endswith(")")
+    if neg:
+        t = t[1:-1].strip()
+    pct = t.endswith("%")
+    if pct:
+        t = t[:-1].strip()
+    for ch in ("\u00a5", "$", "\u20ac", "\u00a3", ",", " ", "\u00a0"):
+        t = t.replace(ch, "")
+    try:
+        n = float(t)
+    except ValueError:
+        return None
+    if pct:
+        n /= 100.0
+    return -n if neg else n
+
+
+def _proper(s: str) -> str:
+    """每词首字母大写(仅 ASCII 字母, 其余原样)。"""
+    out = []
+    prev_alpha = False
+    for ch in s:
+        if ch.isalpha() and ch.isascii():
+            out.append(ch.upper() if not prev_alpha else ch.lower())
+            prev_alpha = True
+        else:
+            out.append(ch)
+            prev_alpha = False
+    return "".join(out)
+
+
+def _shift_month(d: _dt.date, months: int, keep_day: bool) -> _dt.date:
+    """按月偏移; keep_day=True 保持日(不存在则取月末), False 取目标月月末。"""
+    y = d.year + (d.month - 1 + months) // 12
+    m = (d.month - 1 + months) % 12 + 1
+    last = calendar.monthrange(y, m)[1]
+    return _dt.date(y, m, min(d.day, last) if keep_day else last)
+
+
+def _fmt_date_tokens(d, fmt: str) -> str:
+    """迷你日期格式: yyyy/yy/mm/dd/hh/ss; mm 在 h 后或 : 前按分钟。"""
+    low = fmt.lower()
+    out = []
+    i = 0
+    while i < len(fmt):
+        if low.startswith("yyyy", i):
+            out.append(f"{d.year:04d}")
+            i += 4
+        elif low.startswith("yy", i):
+            out.append(f"{d.year % 100:02d}")
+            i += 2
+        elif low.startswith("mm", i):
+            before = low[:i]
+            after = low[i + 2:]
+            minute = ("h" in before) or after.startswith(":") or after.startswith("ss")
+            if minute:
+                out.append(f"{getattr(d, 'minute', 0):02d}")
+            else:
+                out.append(f"{d.month:02d}")
+            i += 2
+        elif low.startswith("dd", i):
+            out.append(f"{d.day:02d}")
+            i += 2
+        elif low.startswith("hh", i):
+            out.append(f"{getattr(d, 'hour', 0):02d}")
+            i += 2
+        elif low.startswith("ss", i):
+            out.append(f"{getattr(d, 'second', 0):02d}")
+            i += 2
+        elif low[i] == "m":
+            out.append(str(d.month))
+            i += 1
+        elif low[i] == "d":
+            out.append(str(d.day))
+            i += 1
+        elif low[i] == "h":
+            out.append(str(getattr(d, "hour", 0)))
+            i += 1
+        elif low[i] == "s":
+            out.append(str(getattr(d, "second", 0)))
+            i += 1
+        else:
+            out.append(fmt[i])
+            i += 1
+    return "".join(out)
+
+
+def _fmt_num_tokens(v, fmt: str) -> str:
+    """迷你数字格式: 支持 % 缩放、小数位数(0.00)、千分位(#,##0)。"""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        n = float(v)
+    else:
+        n = _parse_number_text(_text_of(v))
+    if n is None:
+        return _text_of(v)
+    pct = "%" in fmt
+    if pct:
+        n *= 100.0
+    m = re.search(r"\.([0#]+)", fmt)
+    dec = len(m.group(1)) if m else 0
+    thousands = "," in fmt
+    s = f"{n:,.{dec}f}" if thousands else f"{n:.{dec}f}"
+    return s + "%" if pct else s
 
 
 # ---------------------------------------------------------------------------
@@ -411,11 +602,26 @@ class Evaluator:
             return t.text
         if t.kind == "ident":
             name = t.text.upper()
-            # 函数调用: ident 紧跟 '('(消解 列名/函数歧义: SUM( 是函数,裸 SUM 是列)
-            nxt = self.toks[self.i + 1] if self.i + 1 < len(self.toks) else None
+            # 函数名可带数字/点(LOG10 / VAR.P / STDEV.S / RANK.EQ); 仅当后面紧跟 '(' 才合并
+            j = self.i + 1
+            while j < len(self.toks):
+                nx = self.toks[j]
+                if nx.kind == "num" and re.fullmatch(r"\d+", nx.text):
+                    name += nx.text
+                    j += 1
+                elif (nx.text == "." and j + 1 < len(self.toks)
+                      and self.toks[j + 1].kind == "ident"):
+                    name += "." + self.toks[j + 1].text.upper()
+                    j += 2
+                else:
+                    break
+            nxt = self.toks[j] if j < len(self.toks) else None
             if nxt is not None and nxt.text == "(":
-                self.next()
-                self.next()               # 消费 '('
+                self.i = j + 1                  # 消费 函数名 与 '('
+                if name in _LAZY_FUNCS:         # 惰性: 只扫描参数区间, 被选中的分支才求值
+                    spans = self.args_lazy()
+                    self.expect(")")
+                    return self.call_lazy(name, spans)
                 args = self.args()
                 self.expect(")")
                 return self.call(name, args)
@@ -427,6 +633,9 @@ class Evaluator:
                 self.next()
                 return name == "TRUE"
             raise FormulaError(f"未知名称 '{t.text}'")
+        ref = self._try_reference()          # $A$1 等以 $ 开头的引用
+        if ref is not None:
+            return ref
         raise FormulaError(f"意外的符号 '{t.text}'")
 
     def args(self):
@@ -438,6 +647,45 @@ class Evaluator:
             out.append(self.expr())
             if not self.accept(","):
                 return out
+
+    def args_lazy(self):
+        """惰性参数: 仅按括号/逗号配平扫描出每个参数的 token 区间(不求值)。"""
+        spans = []
+        if self.peek() is not None and self.peek().text == ")":
+            return spans
+        while True:
+            start = self.i
+            depth = 0
+            while True:
+                t = self.peek()
+                if t is None:
+                    raise FormulaError("公式不完整")
+                if t.text == "(":
+                    depth += 1
+                elif t.text == ")":
+                    if depth == 0:
+                        break
+                    depth -= 1
+                elif t.text == "," and depth == 0:
+                    break
+                self.i += 1
+            spans.append((start, self.i))
+            if self.accept(","):
+                continue
+            return spans
+
+    def eval_span(self, span):
+        """按 token 区间求值子表达式(共享 env 与当前坐标, 与主解析同语义)。"""
+        start, end = span
+        if start >= end:
+            return None              # 空参数(=IF(A1,,1))按空白处理
+        sub = Evaluator(self.env, self.sheet, self.row, self.col)
+        sub.toks = self.toks[start:end]
+        sub.i = 0
+        v = sub.expr()
+        if sub.peek() is not None:
+            raise FormulaError(f"参数结尾有多余内容: '{sub.peek().text}'")
+        return v
 
     # ---- 值化 ----
     def value_of(self, arg):
@@ -474,6 +722,20 @@ class Evaluator:
             if args:
                 raise FormulaError(f"{name}() 不接受参数")
             return name == "TRUE"
+        if name in _NA_FUNCS:
+            raise FormulaError("NA()", "na")
+        if name in _LOOKUP_FUNCS:
+            return self._lookup_fn(name, args)
+        if name in _STAT_FUNCS:
+            return self._stat_fn(name, args)
+        if name in _MATH_FUNCS:
+            return self._math_fn(name, args)
+        if name in _REF_FUNCS:
+            return self._ref_fn(name, args)
+        if name in _EXTRA_DATE_FUNCS:
+            return self._date_fn2(name, args)
+        if name in _EXTRA_TEXT_FUNCS:
+            return self._text_fn2(name, args)
         if name in _AGG_FUNCS:
             return self._agg(name, args)
         if name in _NUM_FUNCS:
@@ -484,8 +746,6 @@ class Evaluator:
             return self._log_fn(name, args)
         if name in _INFO_FUNCS:
             return self._info_fn(name, args)
-        if name == "IF":
-            return self._if(args)
         if name in _DATE_FUNCS:
             if name == "DATE":
                 if len(args) != 3:
@@ -685,6 +945,44 @@ class Evaluator:
                     n += 1
                 i += 1
             return float(n)
+        if name == "AVERAGEIF":
+            need(2)
+            rng = args[0]
+            crit = _Criteria.parse(self.value_of(args[1]))
+            avg_rng = args[2] if len(args) > 2 else rng
+            g, it = iterate_geom(rng)
+            vals = []
+            i = 0
+            for v in it:
+                if crit.match(v):
+                    n = self._num_strict(at(avg_rng, g, i))
+                    if n is not None:
+                        vals.append(n)
+                i += 1
+            if not vals:
+                raise FormulaError("AVERAGEIF() 没有匹配的数值", "div0")
+            return sum(vals) / len(vals)
+        if name in ("AVERAGEIFS", "MAXIFS", "MINIFS"):
+            need(3)
+            tgt = args[0]
+            pairs = [(args[i], args[i + 1]) for i in range(1, len(args), 2)]
+            g, it = iterate_geom(pairs[0][0])
+            vals = []
+            i = 0
+            for v in it:
+                if all(_Criteria.parse(self.value_of(cc)).match(at(cr, g, i))
+                       for cr, cc in pairs):
+                    n = self._num_strict(at(tgt, g, i))
+                    if n is not None:
+                        vals.append(n)
+                i += 1
+            if not vals:
+                if name == "AVERAGEIFS":
+                    raise FormulaError("AVERAGEIFS() 没有匹配的数值", "div0")
+                return 0.0
+            if name == "AVERAGEIFS":
+                return sum(vals) / len(vals)
+            return max(vals) if name == "MAXIFS" else min(vals)
         raise FormulaError(f"不支持的聚合 {name}()")
 
     def _cell_at(self, arg, idx: int):
@@ -698,6 +996,781 @@ class Evaluator:
         if r > r2:
             return None
         return self.env.cell(sh, r, c)
+
+    # ---- 区域/取值辅助(查找/统计/引用族共用) ----
+    def _region_geo(self, arg):
+        """区域几何 (sh, r1, c1, h, w); 非引用返回 None。整列按实际使用范围收敛。"""
+        if not _is_ref(arg):
+            return None
+        if arg[0] == "cell":
+            sh, r, c = arg[1]
+            return (sh, r, c, 1, 1)
+        sh, r1, c1, r2, c2 = arg[1]
+        if not self.env.sheet_exists(sh):
+            raise FormulaError(f"引用的工作表不存在: {sh}", "ref")
+        r2 = min(r2, self.env.sheet_max_row(sh))
+        return (sh, r1, c1, max(r2 - r1 + 1, 0), c2 - c1 + 1)
+
+    def _flat_values(self, args):
+        """参数展开为平面值列表(区域按行列顺序展开; 单格取单值)。"""
+        out = []
+        for a in args:
+            if not _is_ref(a):
+                out.append(a)
+            elif a[0] == "cell":
+                out.append(self.env.cell(*a[1]))
+            else:
+                out.extend(self._iter_region(a))
+        return out
+
+    def _nums(self, args):
+        """聚合数值: 引用/区域中的文本与布尔忽略; 直接参数宽松转换。"""
+        refs, dirs = self._scalar_args(args)
+        nums = [x for x in (self._num_strict(v) for v in refs) if x is not None]
+        for v in dirs:
+            n = self._num_loose(v)
+            if n is not None:
+                nums.append(n)
+        return nums
+
+    def _lookup_scan(self, vec, needle, mode):
+        """一维值列表定位 needle → 0 基下标(未命中 None)。
+
+        mode 0=精确(文本不区分大小写, 支持 * ? 通配), 1=最后一个 <=needle(升序),
+        -1=最后一个 >=needle(降序)。
+        """
+        if mode == 0:
+            if isinstance(needle, str) and ("*" in needle or "?" in needle):
+                crit = _Criteria.parse(needle)
+                for i, v in enumerate(vec):
+                    if crit.match(v):
+                        return i
+                return None
+            for i, v in enumerate(vec):
+                if self._eq(v, needle):
+                    return i
+            return None
+        hit = None
+        for i, v in enumerate(vec):
+            if v is None:
+                continue
+            if isinstance(v, str):
+                if not isinstance(needle, str):
+                    continue
+                ok = (self.compare("<=", v.casefold(), needle.casefold()) if mode > 0
+                      else self.compare(">=", v.casefold(), needle.casefold()))
+            else:
+                n = self._num_strict(v)
+                if n is None:
+                    continue
+                ok = (self.compare("<=", n, needle) if mode > 0
+                      else self.compare(">=", n, needle))
+            if ok:
+                hit = i
+        return hit
+
+    # ---- 查找族 ----
+    def _lookup_fn(self, name, args):
+        if name in ("VLOOKUP", "HLOOKUP"):
+            if len(args) < 3:
+                raise FormulaError(f"{name}() 参数不足")
+            needle = self.value_of(args[0])
+            geo = self._region_geo(args[1])
+            if geo is None:
+                raise FormulaError(f"{name}() 第二参数必须是区域", "value")
+            sh, r1, c1, h, w = geo
+            idx = self._num_loose(self.value_of(args[2]))
+            if idx is None:
+                raise FormulaError(f"{name}() 序号不是数值", "value")
+            i = int(idx)
+            approx = self._truth(self.value_of(args[3])) if len(args) > 3 else True
+            mode = 1 if approx else 0
+            if name == "VLOOKUP":
+                if i < 1 or i > w:
+                    raise FormulaError(f"VLOOKUP 第 {i} 列超出区域宽度 {w}", "ref")
+                vec = [self.env.cell(sh, r1 + k, c1) for k in range(h)]
+                pos = self._lookup_scan(vec, needle, mode)
+                if pos is None:
+                    raise FormulaError(f"VLOOKUP 未找到 {_text_of(needle)}", "na")
+                v = self.env.cell(sh, r1 + pos, c1 + i - 1)
+            else:
+                if i < 1 or i > h:
+                    raise FormulaError(f"HLOOKUP 第 {i} 行超出区域高度 {h}", "ref")
+                vec = [self.env.cell(sh, r1, c1 + k) for k in range(w)]
+                pos = self._lookup_scan(vec, needle, mode)
+                if pos is None:
+                    raise FormulaError(f"HLOOKUP 未找到 {_text_of(needle)}", "na")
+                v = self.env.cell(sh, r1 + i - 1, c1 + pos)
+            return 0.0 if v is None else v
+        if name == "MATCH":
+            if len(args) < 2:
+                raise FormulaError("MATCH() 参数不足")
+            needle = self.value_of(args[0])
+            geo = self._region_geo(args[1])
+            if geo is None:
+                raise FormulaError("MATCH() 第二参数必须是区域", "value")
+            sh, r1, c1, h, w = geo
+            if h > 1 and w > 1:
+                raise FormulaError("MATCH() 只支持单行或单列区域", "value")
+            if w == 1:
+                vec = [self.env.cell(sh, r1 + k, c1) for k in range(h)]
+            else:
+                vec = [self.env.cell(sh, r1, c1 + k) for k in range(w)]
+            mode = 1
+            if len(args) > 2:
+                m = self._num_loose(self.value_of(args[2]))
+                mode = int(m) if m is not None else 1
+            pos = self._lookup_scan(vec, needle, mode)
+            if pos is None:
+                raise FormulaError(f"MATCH 未找到 {_text_of(needle)}", "na")
+            return float(pos + 1)
+        if name == "INDEX":
+            if len(args) < 2:
+                raise FormulaError("INDEX() 参数不足")
+            a0 = args[0]
+            if not _is_ref(a0):
+                raise FormulaError("INDEX() 第一参数必须是区域", "value")
+            sh, r1, c1, h, w = self._region_geo(a0)
+            rn = self._num_loose(self.value_of(args[1]))
+            rn = 0 if rn is None else int(rn)
+            cn = None
+            if len(args) > 2:
+                cnv = self._num_loose(self.value_of(args[2]))
+                cn = 0 if cnv is None else int(cnv)
+            if len(args) == 2:
+                if h == 1:                    # 单行区域: 参数是列序号
+                    rn, cn = 1, rn
+                else:
+                    cn = 1
+            elif cn is None:
+                cn = 1
+            if rn == 0 and cn == 0:
+                return a0
+            if rn == 0:                       # 整列切片 → 列区域
+                if cn < 1 or cn > w:
+                    raise FormulaError("INDEX() 下标越界", "ref")
+                return ("region", (sh, r1, c1 + cn - 1, r1 + h - 1, c1 + cn - 1))
+            if cn == 0:                       # 整行切片 → 行区域
+                if rn < 1 or rn > h:
+                    raise FormulaError("INDEX() 下标越界", "ref")
+                return ("region", (sh, r1 + rn - 1, c1, r1 + rn - 1, c1 + w - 1))
+            if rn < 1 or rn > h or cn < 1 or cn > w:
+                raise FormulaError("INDEX() 下标越界", "ref")
+            return ("cell", (sh, r1 + rn - 1, c1 + cn - 1))
+        if name == "XLOOKUP":
+            if len(args) < 3:
+                raise FormulaError("XLOOKUP() 参数不足")
+            needle = self.value_of(args[0])
+            if self._region_geo(args[1]) is None or self._region_geo(args[2]) is None:
+                raise FormulaError("XLOOKUP() 的查找/返回必须是区域", "value")
+            lv = self._flat_values([args[1]])
+            rv = self._flat_values([args[2]])
+            if len(lv) != len(rv):
+                raise FormulaError("XLOOKUP() 查找区域与返回区域尺寸不一致", "value")
+            mode = 0
+            if len(args) > 4:
+                m = self._num_loose(self.value_of(args[4]))
+                mode = int(m) if m is not None else 0
+            rev = False
+            if len(args) > 5:
+                s = self._num_loose(self.value_of(args[5]))
+                rev = s is not None and int(s) < 0
+            order = range(len(lv) - 1, -1, -1) if rev else range(len(lv))
+            pos = None
+            if mode == 0:
+                if isinstance(needle, str) and ("*" in needle or "?" in needle):
+                    crit = _Criteria.parse(needle)
+                    for i in order:
+                        if crit.match(lv[i]):
+                            pos = i
+                            break
+                else:
+                    for i in order:
+                        if self._eq(lv[i], needle):
+                            pos = i
+                            break
+            else:
+                n_needle = self._num_loose(needle)
+                best = None
+                best_val = None
+                for i in order:
+                    if self._eq(lv[i], needle):
+                        pos = i
+                        break
+                    n = self._num_strict(lv[i])
+                    if n is None or n_needle is None:
+                        continue
+                    if mode == -1 and n <= n_needle:
+                        if best is None or n > best_val:
+                            best, best_val = i, n
+                    elif mode == 1 and n >= n_needle:
+                        if best is None or n < best_val:
+                            best, best_val = i, n
+                if pos is None:
+                    pos = best
+            if pos is None:
+                if len(args) > 3:
+                    return self.value_of(args[3])
+                raise FormulaError(f"XLOOKUP 未找到 {_text_of(needle)}", "na")
+            v = rv[pos]
+            return 0.0 if v is None else v
+        if name == "LOOKUP":
+            if len(args) < 2:
+                raise FormulaError("LOOKUP() 参数不足")
+            needle = self.value_of(args[0])
+            lv = self._flat_values([args[1]])
+            rv = self._flat_values([args[2]]) if len(args) > 2 else lv
+            if len(rv) != len(lv):
+                raise FormulaError("LOOKUP() 向量长度不一致", "value")
+            pos = self._lookup_scan(lv, needle, 1)
+            if pos is None:
+                raise FormulaError(f"LOOKUP 未找到 {_text_of(needle)}", "na")
+            v = rv[pos]
+            return 0.0 if v is None else v
+        raise FormulaError(f"不支持的查找函数 {name}()")
+
+    # ---- 统计族 ----
+    def _stat_fn(self, name, args):
+        if name == "SUMPRODUCT":
+            if not args:
+                raise FormulaError("SUMPRODUCT() 参数不足")
+
+            def sp_num(v):
+                n = self._num_loose(v)
+                return n if n is not None else 0.0
+
+            cols = [[sp_num(v) for v in self._flat_values([a])] for a in args]
+            lens = {len(c) for c in cols if len(c) > 1}
+            if len(lens) > 1:
+                raise FormulaError("SUMPRODUCT() 各参数尺寸不一致", "value")
+            n = max(lens) if lens else 1
+            total = 0.0
+            for i in range(n):
+                p = 1.0
+                for c in cols:
+                    p *= c[0] if len(c) == 1 else c[i]
+                total += p
+            return total
+        if name in ("LARGE", "SMALL"):
+            if len(args) < 2:
+                raise FormulaError(f"{name}() 参数不足")
+            arr = self._nums([args[0]])
+            k = self._num_loose(self.value_of(args[1]))
+            if k is None:
+                raise FormulaError(f"{name}() 的 k 不是数值", "value")
+            k = int(k)
+            if k < 1 or k > len(arr):
+                raise FormulaError(f"{name}() 的 k 越界: {k}", "num")
+            s = sorted(arr, reverse=(name == "LARGE"))
+            return float(s[k - 1])
+        if name in ("RANK", "RANK.EQ"):
+            if len(args) < 2:
+                raise FormulaError(f"{name}() 参数不足")
+            x = self._num_loose(self.value_of(args[0]))
+            if x is None:
+                raise FormulaError("RANK() 的值不是数值", "value")
+            arr = self._nums([args[1]])
+            order = self._num_loose(self.value_of(args[2])) if len(args) > 2 else 0
+            asc = order is not None and order != 0
+            for i, n in enumerate(sorted(arr, reverse=not asc)):
+                if n == x:
+                    return float(i + 1)
+            raise FormulaError("RANK() 的值不在区域内", "na")
+        if name == "PERCENTILE":
+            if len(args) < 2:
+                raise FormulaError("PERCENTILE() 参数不足")
+            arr = sorted(self._nums([args[0]]))
+            if not arr:
+                raise FormulaError("PERCENTILE() 参数不含数值")
+            p = self._num_loose(self.value_of(args[1]))
+            if p is None or p < 0 or p > 1:
+                raise FormulaError("PERCENTILE() 的 k 必须在 0~1", "num")
+            pos = p * (len(arr) - 1)
+            lo = int(math.floor(pos))
+            hi = min(lo + 1, len(arr) - 1)
+            return arr[lo] + (arr[hi] - arr[lo]) * (pos - lo)
+        nums = self._nums(args)
+        if name == "MEDIAN":
+            if not nums:
+                raise FormulaError("MEDIAN() 参数不含数值")
+            s = sorted(nums)
+            n = len(s)
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+        if name == "PRODUCT":
+            p = 1.0
+            for n in nums:
+                p *= n
+            return p if nums else 0.0
+        if name in ("STDEV", "STDEV.S", "STDEV.P", "VAR", "VAR.S", "VAR.P"):
+            if not nums:
+                raise FormulaError(f"{name}() 参数不含数值")
+            sample = name in ("STDEV", "STDEV.S", "VAR", "VAR.S")
+            if sample and len(nums) < 2:
+                raise FormulaError(f"{name}() 样本至少需要 2 个数值", "div0")
+            mean = sum(nums) / len(nums)
+            denom = (len(nums) - 1) if sample else len(nums)
+            var = sum((x - mean) ** 2 for x in nums) / denom
+            return math.sqrt(var) if name.startswith("STDEV") else var
+        raise FormulaError(f"不支持的统计函数 {name}()")
+
+    # ---- 数学族 ----
+    def _math_fn(self, name, args):
+        def num(i=0):
+            if len(args) <= i:
+                raise FormulaError(f"{name}() 缺少参数")
+            n = self._num_loose(self.value_of(args[i]))
+            if n is None:
+                raise FormulaError(f"{name}() 参数不是数值", "value")
+            return n
+
+        if name == "SQRT":
+            x = num()
+            if x < 0:
+                raise FormulaError("SQRT() 参数为负", "num")
+            return math.sqrt(x)
+        if name == "EXP":
+            return math.exp(num())
+        if name == "LN":
+            x = num()
+            if x <= 0:
+                raise FormulaError("LN() 参数必须为正", "num")
+            return math.log(x)
+        if name in ("LOG", "LOG10"):
+            x = num()
+            if x <= 0:
+                raise FormulaError(f"{name}() 参数必须为正", "num")
+            if name == "LOG" and len(args) > 1:
+                b = num(1)
+                if b <= 0 or b == 1:
+                    raise FormulaError("LOG() 底数非法", "num")
+                return math.log(x, b)
+            return math.log10(x)
+        if name == "SIGN":
+            x = num()
+            return float((x > 0) - (x < 0))
+        if name == "TRUNC":
+            x = num()
+            d = int(num(1)) if len(args) > 1 else 0
+            m = 10 ** d
+            return math.floor(x * m) / m if x >= 0 else math.ceil(x * m) / m
+        if name == "POWER":
+            base, e = num(0), num(1)
+            try:
+                return float(base ** e)
+            except (OverflowError, ZeroDivisionError, ValueError):
+                raise FormulaError("POWER() 结果非法", "num") from None
+        if name == "CEILING":
+            x = num()
+            sig = num(1) if len(args) > 1 else 1.0
+            if sig == 0:
+                return 0.0
+            if x < 0 and sig > 0:
+                raise FormulaError("CEILING() 参数符号不一致", "num")
+            return math.ceil(x / sig) * sig
+        if name == "FLOOR":
+            x = num()
+            sig = num(1) if len(args) > 1 else 1.0
+            if sig == 0:
+                raise FormulaError("FLOOR() 精度为 0", "div0")
+            return math.floor(x / sig) * sig
+        if name == "MROUND":
+            x, mult = num(0), num(1)
+            if mult == 0:
+                return 0.0
+            q = x / mult
+            return (math.floor(q + 0.5) if q >= 0 else math.ceil(q - 0.5)) * mult
+        if name == "FACT":
+            x = int(num())
+            if x < 0:
+                raise FormulaError("FACT() 参数为负", "num")
+            return float(math.factorial(min(x, 170)))
+        if name in ("EVEN", "ODD"):
+            x = num()
+            a = math.ceil(abs(x))
+            n = a + (a % 2) if name == "EVEN" else (a if a % 2 == 1 else a + 1)
+            return float(n if x >= 0 else -n)
+        if name == "SUMSQ":
+            return float(sum(n * n for n in self._nums(args)))
+        if name in ("PMT", "FV", "PV", "NPV", "IRR"):
+            return self._finance(name, args)
+        raise FormulaError(f"不支持的数学函数 {name}()")
+
+    # ---- 财务族 ----
+    def _finance(self, name, args):
+        def val(i, default=None):
+            if len(args) <= i:
+                return default
+            return self._num_loose(self.value_of(args[i]))
+
+        if name == "NPV":
+            if len(args) < 2:
+                raise FormulaError("NPV() 参数不足")
+            rate = val(0)
+            if rate is None:
+                raise FormulaError("NPV() 折现率不是数值", "value")
+            vals = self._nums(args[1:])
+            return float(sum(v / (1 + rate) ** (i + 1) for i, v in enumerate(vals)))
+        if name == "IRR":
+            if not args:
+                raise FormulaError("IRR() 参数不足")
+            flows = self._nums(args)
+            if len(flows) < 2:
+                raise FormulaError("IRR() 至少需要 2 期现金流")
+            if all(f >= 0 for f in flows) or all(f <= 0 for f in flows):
+                raise FormulaError("IRR() 现金流无正负变化", "num")
+
+            def npv(r):
+                return sum(f / (1 + r) ** i for i, f in enumerate(flows))
+
+            lo, hi = -0.9999, 10.0
+            if npv(lo) * npv(hi) > 0:
+                raise FormulaError("IRR() 无法收敛", "num")
+            for _ in range(200):
+                mid = (lo + hi) / 2
+                if npv(lo) * npv(mid) <= 0:
+                    hi = mid
+                else:
+                    lo = mid
+            return (lo + hi) / 2
+        rate = val(0)
+        nper = val(1)
+        if rate is None:
+            raise FormulaError(f"{name}() 利率不是数值", "value")
+        if nper is None:
+            raise FormulaError(f"{name}() 期数不是数值", "value")
+        nper = int(nper)
+        if nper == 0:
+            raise FormulaError(f"{name}() 期数为 0", "div0")
+        if name == "PMT":
+            pv = val(2)
+            if pv is None:
+                raise FormulaError("PMT() 现值不是数值", "value")
+            fv = val(3, 0.0) or 0.0
+            typ = val(4, 0.0) or 0.0
+            if rate == 0:
+                return float(-(pv + fv) / nper)
+            g = (1 + rate) ** nper
+            r = -(pv * g + fv) * rate / (g - 1)
+            return float(r / (1 + rate) if typ else r)
+        if name == "FV":
+            pmt = val(2)
+            if pmt is None:
+                raise FormulaError("FV() 每期金额不是数值", "value")
+            pv = val(3, 0.0) or 0.0
+            typ = val(4, 0.0) or 0.0
+            if rate == 0:
+                return float(-(pv + pmt * nper))
+            g = (1 + rate) ** nper
+            return float(-(pv * g + pmt * (1 + rate * typ) * (g - 1) / rate))
+        pmt = val(2)                       # PV
+        if pmt is None:
+            raise FormulaError("PV() 每期金额不是数值", "value")
+        fv = val(3, 0.0) or 0.0
+        typ = val(4, 0.0) or 0.0
+        if rate == 0:
+            return float(-(fv + pmt * nper))
+        g = (1 + rate) ** nper
+        return float(-(fv + pmt * (1 + rate * typ) * (g - 1) / rate) / g)
+
+    # ---- 引用族 ----
+    def _ref_fn(self, name, args):
+        if name in ("ROW", "COLUMN"):
+            if not args:
+                return float(self.row if name == "ROW" else self.col)
+            geo = self._region_geo(args[0])
+            if geo is None:
+                raise FormulaError(f"{name}() 参数必须是引用", "value")
+            return float(geo[1] if name == "ROW" else geo[2])
+        if name in ("ROWS", "COLUMNS"):
+            if len(args) != 1:
+                raise FormulaError(f"{name}() 需要 1 个参数")
+            geo = self._region_geo(args[0])
+            if geo is None:
+                raise FormulaError(f"{name}() 参数必须是区域", "value")
+            return float(geo[3] if name == "ROWS" else geo[4])
+        if len(args) < 3:                  # OFFSET
+            raise FormulaError("OFFSET() 参数不足")
+        geo = self._region_geo(args[0])
+        if geo is None:
+            raise FormulaError("OFFSET() 第一参数必须是引用", "value")
+        sh, r1, c1, h, w = geo
+
+        def onum(i, default):
+            if len(args) <= i:
+                return default
+            n = self._num_loose(self.value_of(args[i]))
+            return default if n is None else int(n)
+
+        dr = onum(1, 0)
+        dc = onum(2, 0)
+        nh = onum(3, h)
+        nw = onum(4, w)
+        nr, nc = r1 + dr, c1 + dc
+        if nr < 1 or nc < 1 or nh < 1 or nw < 1:
+            raise FormulaError("OFFSET() 结果越界", "ref")
+        if nh == 1 and nw == 1:
+            return ("cell", (sh, nr, nc))
+        return ("region", (sh, nr, nc, nr + nh - 1, nc + nw - 1))
+
+    # ---- 日期族 ----
+    def _date_of(self, v) -> _dt.date:
+        """值 → 日期(数值按序列号, 文本按常见格式)。"""
+        if isinstance(v, _dt.datetime):
+            return v.date()
+        if isinstance(v, _dt.date):
+            return v
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return _from_serial(float(v))
+        if isinstance(v, str):
+            d = _parse_date_text(v)
+            if d is not None:
+                return d
+        raise FormulaError(f"不是日期: {_text_of(v)}", "value")
+
+    def _time_of(self, v):
+        """值 → (h, m, s); 数值取小数部分(Excel 时间序列)。"""
+        if isinstance(v, _dt.datetime):
+            return (v.hour, v.minute, v.second)
+        if isinstance(v, _dt.time):
+            return (v.hour, v.minute, v.second)
+        if isinstance(v, _dt.date):
+            return (0, 0, 0)
+        n = self._num_loose(v)
+        if n is None:
+            raise FormulaError(f"不是时间: {_text_of(v)}", "value")
+        secs = int(round((n - math.floor(n)) * 86400))
+        return (secs // 3600 % 24, secs // 60 % 60, secs % 60)
+
+    def _date_fn2(self, name, args):
+        if not args:
+            raise FormulaError(f"{name}() 缺少参数")
+        if name == "DATEVALUE":
+            return self._date_of(self.value_of(args[0]))
+        if name in ("YEAR", "MONTH", "DAY"):
+            d = self._date_of(self.value_of(args[0]))
+            return float({"YEAR": d.year, "MONTH": d.month, "DAY": d.day}[name])
+        if name in ("HOUR", "MINUTE", "SECOND"):
+            h, m, s = self._time_of(self.value_of(args[0]))
+            return float({"HOUR": h, "MINUTE": m, "SECOND": s}[name])
+        if name == "WEEKDAY":
+            d = self._date_of(self.value_of(args[0]))
+            t = 1
+            if len(args) > 1:
+                tv = self._num_loose(self.value_of(args[1]))
+                t = int(tv) if tv is not None else 1
+            wd = d.weekday()                  # 周一 = 0
+            if t == 2:
+                return float(wd + 1)
+            if t == 3:
+                return float(wd)
+            return float((wd + 1) % 7 + 1)    # 默认/type=1: 周日 = 1
+        if name == "DAYS":
+            if len(args) < 2:
+                raise FormulaError("DAYS() 需要 2 个参数")
+            d2 = self._date_of(self.value_of(args[0]))
+            d1 = self._date_of(self.value_of(args[1]))
+            return float((d2 - d1).days)
+        if name in ("EOMONTH", "EDATE"):
+            d = self._date_of(self.value_of(args[0]))
+            mv = self._num_loose(self.value_of(args[1])) if len(args) > 1 else 0.0
+            months = int(mv) if mv is not None else 0
+            return _shift_month(d, months, keep_day=(name == "EDATE"))
+        if name == "DATEDIF":
+            if len(args) < 3:
+                raise FormulaError("DATEDIF() 参数不足")
+            d1 = self._date_of(self.value_of(args[0]))
+            d2 = self._date_of(self.value_of(args[1]))
+            unit = _text_of(self.value_of(args[2])).strip().upper()
+            if d2 < d1:
+                raise FormulaError("DATEDIF() 结束日期早于起始日期", "num")
+            if unit == "D":
+                return float((d2 - d1).days)
+            if unit == "Y":
+                y = d2.year - d1.year
+                if (d2.month, d2.day) < (d1.month, d1.day):
+                    y -= 1
+                return float(y)
+            if unit == "M":
+                m = (d2.year - d1.year) * 12 + d2.month - d1.month
+                if d2.day < d1.day:
+                    m -= 1
+                return float(m)
+            if unit == "YM":
+                m = (d2.month - d1.month) % 12
+                if d2.day < d1.day:
+                    m = (m - 1) % 12
+                return float(m)
+            if unit == "MD":
+                dd = d2.day - d1.day
+                if dd < 0:
+                    py, pm = ((d2.year, d2.month - 1) if d2.month > 1
+                              else (d2.year - 1, 12))
+                    dd += calendar.monthrange(py, pm)[1]
+                return float(dd)
+            if unit == "YD":
+                y = d2.year - d1.year
+                if y > 0 and (d2.month, d2.day) < (d1.month, d1.day):
+                    y -= 1
+                try:
+                    n1 = d1.replace(year=d2.year - y)
+                except ValueError:            # 2/29 → 2/28
+                    n1 = d1.replace(year=d2.year - y, day=28)
+                return float((d2 - n1).days)
+            raise FormulaError(f"DATEDIF() 单位非法: {unit}", "value")
+        if name == "TIME":
+            if len(args) < 3:
+                raise FormulaError("TIME() 参数不足")
+            nums = []
+            for i in range(3):
+                n = self._num_loose(self.value_of(args[i]))
+                nums.append(0.0 if n is None else n)
+            if any(n < 0 for n in nums):
+                raise FormulaError("TIME() 参数为负", "num")
+            secs = int(nums[0]) * 3600 + int(nums[1]) * 60 + int(nums[2])
+            secs %= 86400
+            return _dt.time(secs // 3600, secs // 60 % 60, secs % 60)
+        if name in ("NETWORKDAYS", "WORKDAY"):
+            if len(args) < 2:
+                raise FormulaError(f"{name}() 参数不足")
+            start = self._date_of(self.value_of(args[0]))
+            holi = set()
+            if len(args) > 2:
+                for v in self._flat_values([args[2]]):
+                    try:
+                        holi.add(self._date_of(v))
+                    except FormulaError:
+                        continue
+            if name == "NETWORKDAYS":
+                end = self._date_of(self.value_of(args[1]))
+                if end < start:
+                    start, end = end, start
+                n = 0
+                d = start
+                while d <= end:
+                    if d.weekday() < 5 and d not in holi:
+                        n += 1
+                    d += _dt.timedelta(days=1)
+                return float(n)
+            dv = self._num_loose(self.value_of(args[1]))
+            if dv is None:
+                raise FormulaError("WORKDAY() 天数不是数值", "value")
+            left = abs(int(dv))
+            step = 1 if int(dv) >= 0 else -1
+            d = start
+            while left > 0:
+                d += _dt.timedelta(days=step)
+                if d.weekday() < 5 and d not in holi:
+                    left -= 1
+            return d
+        raise FormulaError(f"不支持的日期函数 {name}()")
+
+    # ---- 文本族扩展 ----
+    def _format_text(self, v, fmt: str) -> str:
+        """TEXT(): 日期格式(含 y/m/d/h/s)走日期渲染, 其余按数值格式。"""
+        low = fmt.lower()
+        if re.search(r"yy|dd|hh|ss", low) or (re.search(r"[ymdhs]", low)
+                                             and not re.search(r"[#0%]", fmt)):
+            base = None
+            if isinstance(v, _dt.datetime):
+                base = v
+            elif isinstance(v, _dt.date):
+                base = _dt.datetime(v.year, v.month, v.day)
+            elif isinstance(v, _dt.time):
+                base = _dt.datetime.combine(_DATE_EPOCH, v)
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                n = float(v)
+                days = int(math.floor(n))
+                secs = int(round((n - days) * 86400))
+                base = (_dt.datetime.combine(_from_serial(days), _dt.time())
+                        + _dt.timedelta(seconds=secs))
+            else:
+                d = _parse_date_text(_text_of(v))
+                if d is not None:
+                    base = _dt.datetime(d.year, d.month, d.day)
+            if base is not None:
+                return _fmt_date_tokens(base, fmt)
+            return _text_of(v)
+        return _fmt_num_tokens(v, fmt)
+
+    def _text_fn2(self, name, args):
+        if name == "CONCAT":
+            return "".join(_text_of(v) for v in self._flat_values(args))
+        if name == "TEXTJOIN":
+            if len(args) < 3:
+                raise FormulaError("TEXTJOIN() 参数不足")
+            delim = _text_of(self.value_of(args[0]))
+            skip_empty = self._truth(self.value_of(args[1]))
+            parts = []
+            for v in self._flat_values(args[2:]):
+                t = _text_of(v)
+                if skip_empty and t == "":
+                    continue
+                parts.append(t)
+            return delim.join(parts)
+        if name == "TEXT":
+            if len(args) < 2:
+                raise FormulaError("TEXT() 参数不足")
+            return self._format_text(self.value_of(args[0]),
+                                     _text_of(self.value_of(args[1])))
+        if not args:
+            raise FormulaError(f"{name}() 缺少参数")
+        if name in ("FIND", "SEARCH"):
+            if len(args) < 2:
+                raise FormulaError(f"{name}() 参数不足")
+            needle = _text_of(self.value_of(args[0]))
+            hay = _text_of(self.value_of(args[1]))
+            start = 1
+            if len(args) > 2:
+                sv = self._num_loose(self.value_of(args[2]))
+                start = int(sv) if sv is not None else 1
+            if start < 1:
+                raise FormulaError(f"{name}() 起始位置非法", "value")
+            pos = (hay.find(needle, start - 1) if name == "FIND"
+                   else hay.casefold().find(needle.casefold(), start - 1))
+            if pos < 0:
+                raise FormulaError(f"{name}() 未找到 '{needle}'", "value")
+            return float(pos + 1)
+        s = _text_of(self.value_of(args[0]))
+        if name == "REPLACE":
+            if len(args) < 4:
+                raise FormulaError("REPLACE() 参数不足")
+            sv = self._num_loose(self.value_of(args[1]))
+            lv = self._num_loose(self.value_of(args[2]))
+            start = int(sv) if sv is not None else 0
+            ln = int(lv) if lv is not None else 0
+            new = _text_of(self.value_of(args[3]))
+            if start < 1 or ln < 0:
+                raise FormulaError("REPLACE() 起始/长度非法", "value")
+            return s[:start - 1] + new + s[start - 1 + ln:]
+        if name == "REPT":
+            nv = self._num_loose(self.value_of(args[1]))
+            if nv is None or nv < 0:
+                raise FormulaError("REPT() 次数非法", "value")
+            n = int(nv)
+            if len(s) * n > 200000:
+                raise FormulaError("REPT() 结果过长", "value")
+            return s * n
+        if name == "EXACT":
+            return _text_of(self.value_of(args[0])) == _text_of(self.value_of(args[1]))
+        if name == "VALUE":
+            n = _parse_number_text(s)
+            if n is None:
+                raise FormulaError(f"VALUE() 无法解析: '{s}'", "value")
+            return float(n)
+        if name == "PROPER":
+            return _proper(s)
+        if name == "CLEAN":
+            return "".join(ch for ch in s if ord(ch) >= 32)
+        if name == "CHAR":
+            n = self._num_loose(self.value_of(args[0]))
+            if n is None or int(n) < 1 or int(n) > 255:
+                raise FormulaError("CHAR() 参数非法", "value")
+            return chr(int(n))
+        if name == "CODE":
+            if not s:
+                raise FormulaError("CODE() 空文本", "value")
+            return float(ord(s[0]))
+        raise FormulaError(f"不支持的函数 {name}()")
 
     # ---- 数值函数 ----
     def _num_fn(self, name, args):
@@ -759,26 +1832,50 @@ class Evaluator:
 
     # ---- 逻辑 ----
     def _log_fn(self, name, args):
-        def truth(a):
-            v = self.value_of(a)
-            if isinstance(v, bool):
-                return v
-            if v is None:
-                return False
-            if isinstance(v, (int, float)):
-                return v != 0
-            if isinstance(v, _dt.date):
-                return True
-            t = v.strip().lower()
-            if t == "true":
-                return True
-            if t == "false":
-                return False
-            return len(t) > 0
         if name == "NOT":
-            return not truth(args[0])
-        vals = [truth(a) for a in args]
+            return not self._truth(self.value_of(args[0]))
+        vals = [self._truth(self.value_of(a)) for a in args]
         return all(vals) if name == "AND" else any(vals)
+
+    # ---- 通用取值辅助 ----
+    @staticmethod
+    def _truth(v) -> bool:
+        """Excel 真值语义: 数值!=0、文本非空且非 'false'、空=False、日期=True。"""
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        if isinstance(v, (int, float)):
+            return v != 0
+        if isinstance(v, _dt.date):
+            return True
+        t = str(v).strip().lower()
+        if t == "true":
+            return True
+        if t == "false":
+            return False
+        return len(t) > 0
+
+    @staticmethod
+    def _eq_key(v):
+        """等值比较键: (类别, 归一值); 0=数值/日期/空(空按0), 1=文本, 2=布尔。"""
+        if v is None:
+            return (0, 0.0)
+        if isinstance(v, bool):
+            return (2, v)
+        if isinstance(v, _dt.date):
+            return (0, _serial_of(v))
+        if isinstance(v, (int, float)):
+            return (0, float(v))
+        return (1, str(v).casefold())
+
+    def _eq(self, l, r) -> bool:
+        """Excel 等值: 文本不区分大小写; 数值/日期按序列号; 数值与文本不相等。"""
+        kl, vl = self._eq_key(l)
+        kr, vr = self._eq_key(r)
+        if kl != kr:
+            return False
+        return vl == vr
 
     # ---- 信息类(IS 系) ----
     def _info_fn(self, name, args):
@@ -800,19 +1897,73 @@ class Evaluator:
             return isinstance(v, bool)
         raise FormulaError(f"不支持的函数 {name}()")
 
-    def _if(self, args):
-        if len(args) not in (2, 3):
-            raise FormulaError("IF() 需要 2~3 个参数")
-        v = self.value_of(args[0])
-        if isinstance(v, bool):
-            cond = v
-        elif isinstance(v, (int, float)):
-            cond = v != 0
-        elif v is None:
-            cond = False
-        else:
-            cond = _text_of(v).strip().lower() not in ("", "false", "0")
-        return self.value_of(args[1]) if cond else (self.value_of(args[2]) if len(args) == 3 else False)
+    # ---- 惰性函数(条件 / 错误捕获 / 多路选择) ----
+    def call_lazy(self, name, spans):
+        if name == "IF":
+            if len(spans) not in (2, 3):
+                raise FormulaError("IF() 需要 2~3 个参数")
+            cond = self._truth(self.value_of(self.eval_span(spans[0])))
+            if cond:
+                return self.value_of(self.eval_span(spans[1]))
+            return (self.value_of(self.eval_span(spans[2]))
+                    if len(spans) == 3 else False)
+        if name in ("ISERROR", "ISERR", "ISNA"):
+            if len(spans) != 1:
+                raise FormulaError(f"{name}() 需要 1 个参数")
+            try:
+                self.value_of(self.eval_span(spans[0]))
+            except FormulaError as e:
+                if name == "ISNA":
+                    return e.code == "na"
+                if name == "ISERR":
+                    return e.code != "na"
+                return True
+            return False
+        if name == "IFERROR":
+            if len(spans) != 2:
+                raise FormulaError("IFERROR() 需要 2 个参数")
+            try:
+                return self.value_of(self.eval_span(spans[0]))
+            except FormulaError:
+                return self.value_of(self.eval_span(spans[1]))
+        if name == "IFNA":
+            if len(spans) != 2:
+                raise FormulaError("IFNA() 需要 2 个参数")
+            try:
+                return self.value_of(self.eval_span(spans[0]))
+            except FormulaError as e:
+                if e.code != "na":
+                    raise
+                return self.value_of(self.eval_span(spans[1]))
+        if name == "IFS":
+            if len(spans) < 2 or len(spans) % 2:
+                raise FormulaError("IFS() 需要成对的 条件,值 参数")
+            for i in range(0, len(spans), 2):
+                if self._truth(self.value_of(self.eval_span(spans[i]))):
+                    return self.value_of(self.eval_span(spans[i + 1]))
+            raise FormulaError("IFS() 没有为真的条件", "na")
+        if name == "SWITCH":
+            if len(spans) < 3:
+                raise FormulaError("SWITCH() 参数不足")
+            target = self.value_of(self.eval_span(spans[0]))
+            rest = spans[1:]
+            for i in range(len(rest) // 2):
+                if self._eq(target, self.eval_span(rest[2 * i])):
+                    return self.value_of(self.eval_span(rest[2 * i + 1]))
+            if len(rest) % 2:                      # 末尾落空值
+                return self.value_of(self.eval_span(rest[-1]))
+            raise FormulaError("SWITCH() 没有匹配项", "na")
+        if name == "CHOOSE":
+            if len(spans) < 2:
+                raise FormulaError("CHOOSE() 参数不足")
+            idx = self._num_loose(self.value_of(self.eval_span(spans[0])))
+            if idx is None:
+                raise FormulaError("CHOOSE() 序号不是数值", "value")
+            i = int(idx)
+            if i < 1 or i > len(spans) - 1:
+                raise FormulaError(f"CHOOSE() 序号越界: {i}", "value")
+            return self.value_of(self.eval_span(spans[i]))
+        raise FormulaError(f"不支持的函数 {name}()")
 
 
 def _cmp_num(op: str, l: float, r: float) -> bool:
@@ -909,8 +2060,9 @@ class _Criteria:
 
     def _match_text(self, s: str) -> bool:
         if not self.num:
-            if self.pattern is not None:     # 通配条件
-                return self.pattern.match(s) is not None
+            if self.pattern is not None and self.op in ("=", "<>"):
+                hit = self.pattern.match(s) is not None
+                return hit if self.op == "=" else not hit
             if self.op == "=":
                 return s == self.val
             if self.op == "<>":
